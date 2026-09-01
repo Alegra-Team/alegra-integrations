@@ -1,0 +1,23 @@
+# Secretos — nunca entran a este repositorio
+.env
+.env.*
+*.key
+*.pem
+.alegra-*
+.n8n-api-key
+credentials.json
+config.local.json
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Dependencias y temporales
+node_modules/
+tmp/
+*.log

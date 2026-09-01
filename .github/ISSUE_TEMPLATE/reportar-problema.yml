@@ -1,0 +1,75 @@
+name: Reportar un problema
+description: Una skill no se activa, responde mal o algo de la documentación no funciona.
+title: "[Problema] "
+labels: ["problema"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cuéntanos qué pasó. Entre más concreto, más rápido lo arreglamos.
+
+        **Importante:** no pegues tu token ni datos reales de tus clientes.
+        Si vas a compartir una respuesta, cambia los nombres y las cifras.
+
+        Si el problema es de seguridad, **no abras un issue**: sigue
+        [SEGURIDAD.md](https://github.com/Alegra-Team/alegra-integrations/blob/main/SEGURIDAD.md).
+
+  - type: input
+    id: skill
+    attributes:
+      label: ¿Qué skill o documento?
+      placeholder: "skills/pymes/alegra-cash-radar"
+    validations:
+      required: true
+
+  - type: textarea
+    id: que_paso
+    attributes:
+      label: ¿Qué pasó?
+      description: Qué le preguntaste y qué te respondió.
+      placeholder: |
+        Le pregunté "¿cuánta plata tengo hoy?" y me respondió que no encontraba cuentas bancarias,
+        pero en Alegra tengo tres.
+    validations:
+      required: true
+
+  - type: textarea
+    id: esperado
+    attributes:
+      label: ¿Qué esperabas que pasara?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cliente
+    attributes:
+      label: ¿Qué asistente usas?
+      options:
+        - Claude Code
+        - Claude (app o web)
+        - Cursor
+        - OpenCode
+        - Codex
+        - Otro
+    validations:
+      required: true
+
+  - type: input
+    id: grupos
+    attributes:
+      label: ¿Qué grupos tienes en `mcp-groups`?
+      placeholder: "reports, banks, currencies"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: revisiones
+    attributes:
+      label: Antes de enviar
+      options:
+        - label: Reinicié mi asistente después de instalar la skill.
+          required: true
+        - label: Revisé que mi servidor MCP se llame exactamente `alegra-mcp`.
+          required: true
+        - label: No incluí tokens, contraseñas ni datos reales de clientes.
+          required: true

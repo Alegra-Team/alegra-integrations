@@ -1,0 +1,78 @@
+name: Proponer una automatización
+description: Cuéntanos qué te gustaría que pasara solo, sin que tengas que preguntar.
+title: "[Automatización] "
+labels: ["automatizacion", "propuesta"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Una automatización corre sola: revisa tus datos cada cierto tiempo y te
+        avisa cuando pasa algo. Cuéntanos qué te gustaría que vigilara por ti.
+
+        **Importante:** no pegues tokens, correos ni datos de tus clientes.
+
+  - type: textarea
+    id: que_haga
+    attributes:
+      label: ¿Qué debería hacer?
+      description: En una o dos frases.
+      placeholder: "Avisarme por WhatsApp cuando un cliente pase de 30 días de mora."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cuando
+    attributes:
+      label: ¿Cada cuánto debería correr?
+      options:
+        - Cada día
+        - Cada semana
+        - Cada mes
+        - Cuando pasa algo específico
+        - No estoy seguro
+    validations:
+      required: true
+
+  - type: dropdown
+    id: canal
+    attributes:
+      label: ¿Por dónde quieres el aviso?
+      multiple: true
+      options:
+        - Correo
+        - WhatsApp
+        - Slack
+        - Telegram
+        - Google Sheets
+        - Otro
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audiencia
+    attributes:
+      label: ¿Para quién es?
+      options:
+        - Para negocios (pymes)
+        - Para contadores
+        - Para los dos
+    validations:
+      required: true
+
+  - type: textarea
+    id: problema
+    attributes:
+      label: ¿Qué problema te resuelve?
+      description: Qué pasa hoy cuando nadie está mirando ese dato.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmacion
+    attributes:
+      label: Antes de enviar
+      options:
+        - label: No incluí tokens, contraseñas ni datos reales de clientes.
+          required: true
+        - label: Revisé la lista de flujos previstos en `automatizaciones/README.md`.
+          required: true

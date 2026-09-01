@@ -1,0 +1,105 @@
+name: Seguridad
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  secretos:
+    name: Buscar secretos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Buscar tokens y claves
+        run: |
+          set -uo pipefail
+          patrones=(
+            'sk-[A-Za-z0-9_-]{20,}'
+            'ghp_[A-Za-z0-9]{36}'
+            'github_pat_[A-Za-z0-9_]{22,}'
+            'AKIA[0-9A-Z]{16}'
+            '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+            'Authorization:[[:space:]]*Basic[[:space:]]+[A-Za-z0-9+/=]{20,}'
+            '(api[_-]?key|token|password|secret)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{16,}["'"'"']'
+          )
+          encontrado=0
+          for p in "${patrones[@]}"; do
+            if grep -rInE --exclude-dir=.git --exclude-dir=.github -e "$p" . ; then
+              echo "::error::Posible secreto encontrado con el patron: $p"
+              encontrado=1
+            fi
+          done
+          if [ "$encontrado" -eq 1 ]; then
+            echo "Revisa SEGURIDAD.md antes de continuar."
+            exit 1
+          fi
+          echo "Sin secretos detectados."
+
+      - name: Buscar archivos que no deben estar en el repo
+        run: |
+          set -uo pipefail
+          if git ls-files | grep -E '(^|/)(\.env|\.env\..*|.*\.pem|.*\.p12|\.n8n-api-key|\.alegra-litellm-key|credentials\.json)$'; then
+            echo "::error::Hay archivos sensibles versionados."
+            exit 1
+          fi
+          echo "Sin archivos sensibles versionados."
+
+  solo-consulta:
+    name: Verificar que las skills solo consultan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Buscar tools de escritura en allowed-tools
+        run: |
+          set -uo pipefail
+          if grep -rInE '^allowed-tools:.*(create|update|delete|void|publish|run[A-Z]|reopen|reverse|apply|upload|email|close[A-Z])' skills/; then
+            echo "::error::Una skill referencia una tool que no es de consulta. El MCP de Alegra hoy es solo lectura."
+            exit 1
+          fi
+          echo "Todas las skills usan solo tools de consulta."
+
+  estructura:
+    name: Verificar estructura de las skills
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cada skill tiene SKILL.md y README.md
+        run: |
+          set -uo pipefail
+          fallo=0
+          while IFS= read -r skill; do
+            carpeta=$(dirname "$skill")
+            nombre=$(basename "$carpeta")
+            [ "$nombre" = "_plantilla" ] && continue
+
+            if [ ! -f "$carpeta/README.md" ]; then
+              echo "::error file=$skill::Falta README.md en $carpeta"
+              fallo=1
+            fi
+
+            declarado=$(grep -m1 '^name:' "$skill" | sed 's/^name:[[:space:]]*//' | tr -d '"'"'"' ')
+            if [ "$declarado" != "$nombre" ]; then
+              echo "::error file=$skill::El campo name ($declarado) no coincide con la carpeta ($nombre)"
+              fallo=1
+            fi
+
+            if ! grep -q 'Trigger phrases:' "$skill"; then
+              echo "::error file=$skill::Falta la linea 'Trigger phrases:' en description"
+              fallo=1
+            fi
+
+            if ! grep -q '^## Límites' "$skill"; then
+              echo "::error file=$skill::Falta la seccion '## Límites'"
+              fallo=1
+            fi
+          done < <(find skills -name SKILL.md)
+
+          exit $fallo

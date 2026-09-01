@@ -1,0 +1,67 @@
+name: Proponer una skill
+description: Cuéntanos qué pregunta de tu negocio te gustaría que tu asistente respondiera.
+title: "[Skill] "
+labels: ["skill", "propuesta"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por proponer una skill. No necesitas saber programar: cuéntanos
+        el problema y nosotros vemos si se puede resolver con los datos de Alegra.
+
+        **Importante:** no pegues tokens, correos ni datos de tus clientes.
+
+  - type: input
+    id: pregunta
+    attributes:
+      label: ¿Qué le preguntarías a tu asistente?
+      description: Escríbelo tal cual lo dirías.
+      placeholder: "¿Qué clientes me compraban antes y dejaron de hacerlo?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problema
+    attributes:
+      label: ¿Qué problema te resuelve?
+      description: Qué haces hoy para responderte eso, y por qué es incómodo.
+      placeholder: "Hoy tengo que exportar las ventas a Excel y comparar mes a mes a mano. Me toma media mañana."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audiencia
+    attributes:
+      label: ¿Para quién es?
+      options:
+        - Para negocios (pymes)
+        - Para contadores
+        - Para los dos
+    validations:
+      required: true
+
+  - type: textarea
+    id: respuesta
+    attributes:
+      label: ¿Cómo se vería la respuesta ideal?
+      description: Un resumen, una tabla, una lista priorizada. Como te sirva a ti.
+    validations:
+      required: false
+
+  - type: textarea
+    id: datos
+    attributes:
+      label: ¿Qué datos de Alegra harían falta?
+      description: Facturas, inventario, contabilidad, nómina… Si no sabes, déjalo vacío.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmacion
+    attributes:
+      label: Antes de enviar
+      options:
+        - label: No incluí tokens, contraseñas ni datos reales de clientes.
+          required: true
+        - label: Revisé que no exista ya una skill parecida en `skills/`.
+          required: true

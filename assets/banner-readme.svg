@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="Alegra Integrations. Dale superpoderes a tu asistente de IA con los datos de tu negocio.">
+  <defs>
+    <linearGradient id="fondo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#30bbb7"/>
+      <stop offset="55%" stop-color="#299e9c"/>
+      <stop offset="100%" stop-color="#1a7e7f"/>
+    </linearGradient>
+    <style>
+      .t { font-family: Inter, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="360" rx="20" fill="url(#fondo)"/>
+
+  <g opacity="0.10" fill="#ffffff">
+    <circle cx="1130" cy="70" r="190"/>
+    <circle cx="1245" cy="300" r="110"/>
+  </g>
+
+  <g transform="translate(96 92) scale(1.5)" opacity="0.95">
+    <path d="M30.0414 30.5295C29.1394 30.9915 21.3038 32.5732 15.3509 30.9536C10.9037 29.7402 4.97206 26.2754 3.00009 25.0797C2.63939 24.8609 2.55889 24.3785 2.81996 24.0465L10.1355 14.7435C10.4457 14.349 11.058 14.3868 11.3251 14.8119C12.5098 16.6974 15.5088 21.1683 19.081 24.2101C23.8729 28.293 27.7446 29.4391 30.0681 29.7044C30.3554 29.7372 30.9435 30.0675 30.0414 30.5295Z" fill="#ffffff"/>
+    <path d="M27.9295 27.289C27.1877 27.1254 21.8978 24.2954 19.2184 20.5112C17.2894 17.7827 15.5548 13.181 14.9184 11.39C14.7769 10.9917 15.0196 10.567 15.4314 10.477L23.6379 8.68343C24.1272 8.57649 24.5769 8.99672 24.5177 9.49575C24.3054 11.2865 23.9859 15.0878 24.5805 18.3882C25.418 23.0443 27.1167 25.5592 28.3367 26.8238C28.4875 26.9802 28.6714 27.4527 27.9295 27.289Z" fill="#ffffff"/>
+    <path d="M28.7674 25.136C28.428 24.735 26.7005 20.9624 26.8043 17.7602C26.8764 15.5854 27.736 12.5691 28.1663 11.1822C28.2915 10.7784 28.7415 10.5853 29.1235 10.7639L33.8634 12.9792C34.3174 13.1914 34.4219 13.8008 34.0781 14.1663C33.1624 15.1397 31.5973 16.9453 30.6337 18.8424C29.1551 21.7512 29.0411 23.845 29.1847 25.0512C29.2024 25.2003 29.1067 25.5369 28.7674 25.136Z" fill="#ffffff"/>
+    <path d="M30.7321 23.9518C30.7179 23.6475 31.2561 21.3043 32.4329 19.873C33.1924 18.9506 34.5449 17.9324 35.2671 17.4184C35.5249 17.2349 35.8798 17.3273 36.0251 17.609L37.2732 20.0289C37.4458 20.3636 37.2284 20.7744 36.8581 20.8374C36.0748 20.9706 34.8363 21.2401 33.8069 21.7291C32.1034 22.5376 31.3128 23.4571 30.9534 24.0611C30.9089 24.1358 30.7463 24.2561 30.7321 23.9518Z" fill="#ffffff"/>
+  </g>
+
+  <text class="t" x="168" y="140" fill="#ffffff" font-size="56" font-weight="700" letter-spacing="-1">Alegra Integrations</text>
+  <text class="t" x="96" y="206" fill="#ffffff" font-size="30" font-weight="500" opacity="0.95">Dale superpoderes a tu asistente de IA</text>
+  <text class="t" x="96" y="248" fill="#ffffff" font-size="30" font-weight="500" opacity="0.95">con los datos de tu negocio.</text>
+
+  <g class="t" fill="#ffffff" font-size="19" font-weight="600">
+    <rect x="96" y="284" width="150" height="40" rx="20" fill="#ffffff" opacity="0.18"/>
+    <text x="171" y="310" text-anchor="middle">15 skills</text>
+
+    <rect x="262" y="284" width="196" height="40" rx="20" fill="#ffffff" opacity="0.18"/>
+    <text x="360" y="310" text-anchor="middle">Pymes y contadores</text>
+
+    <rect x="474" y="284" width="190" height="40" rx="20" fill="#ffffff" opacity="0.18"/>
+    <text x="569" y="310" text-anchor="middle">Solo consulta</text>
+  </g>
+</svg>

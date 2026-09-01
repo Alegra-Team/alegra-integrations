@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ayuda con el MCP de Alegra
+    url: https://developer.alegra.com/docs/mcp-alegra
+    about: Documentación oficial para conectar el MCP y generar tu token.
+  - name: Soporte de Alegra
+    url: https://ayuda.alegra.com
+    about: Si tu duda es sobre Alegra y no sobre este repositorio, escríbenos aquí.
+  - name: Reportar un problema de seguridad
+    url: https://github.com/Alegra-Team/alegra-integrations/blob/main/SEGURIDAD.md
+    about: No abras un issue público. Sigue el proceso de SEGURIDAD.md.
