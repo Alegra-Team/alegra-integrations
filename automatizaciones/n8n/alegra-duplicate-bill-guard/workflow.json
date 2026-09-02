@@ -1,0 +1,346 @@
+{
+  "name": "Alegra — Guardián de facturas duplicadas",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Guardián de facturas duplicadas\n\nCada vez que registras una factura de proveedor en Alegra, este flujo revisa si ya habías registrado una igual y te avisa por Telegram.\n\n**No borra ni cambia nada.** Solo te avisa.\n\n**Necesita n8n accesible desde internet** (n8n Cloud o un servidor con dominio), porque depende de un webhook que Alegra tiene que poder alcanzar.\n\n**Antes de activarlo necesitas:**\n\n1. La credencial de Alegra en n8n, llamada exactamente `Alegra API`.\n2. La credencial de Telegram, llamada `Telegram account`.\n3. Reemplazar `REEMPLAZAR_CHAT_ID` en el nodo \"Avisar por Telegram\".\n4. Activar el flujo y registrar su **Production URL** en Alegra para el evento `new-bill`.\n\nEl paso a paso completo está en el README de esta carpeta.",
+        "height": 460,
+        "width": 440,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -540,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Cuándo te avisa\n\nCon cualquiera de las dos:\n\n**1. Mismo número.** Otra factura del mismo proveedor con el mismo número. Compara ignorando guiones, espacios y mayúsculas: `FC 001` y `fc-001` son la misma.\n\n**2. Mismo monto, fechas cercanas.** Otra del mismo proveedor por el mismo valor (±1%) registrada dentro de 5 días.\n\nLas anuladas no cuentan.\n\nLos dos umbrales se cambian arriba del nodo **Buscar coincidencias**.",
+        "height": 380,
+        "width": 420,
+        "color": 5
+      },
+      "id": "nota-reglas",
+      "name": "Cuándo te avisa",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alegra-factura-proveedor-nueva",
+        "responseMode": "onReceived",
+        "options": {
+          "responseData": "recibido"
+        }
+      },
+      "id": "disparador-webhook",
+      "name": "Cuando registras una factura de proveedor",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra no documenta la forma exacta de lo que manda el webhook, así que aquí\n// no confiamos en ella: buscamos el id donde pueda venir y con ese id volvemos\n// a preguntarle a Alegra la factura completa.\n\nconst crudo = (items[0] && items[0].json) || {};\nconst cuerpo = crudo.body !== undefined ? crudo.body : crudo;\nconst base = Array.isArray(cuerpo) ? cuerpo[0] || {} : cuerpo;\n\nconst posibles = [\n  base.id,\n  base.billId,\n  base.idBill,\n  base.data && base.data.id,\n  base.bill && base.bill.id,\n  base.resource && base.resource.id,\n  base.payload && base.payload.id,\n];\n\nconst facturaId = posibles\n  .map((v) => (v === undefined || v === null ? '' : String(v).trim()))\n  .find((v) => v !== '');\n\nif (!facturaId) {\n  throw new Error(\n    'No encontré el id de la factura en lo que mandó Alegra. Esto fue lo que llegó: ' +\n      JSON.stringify(cuerpo).slice(0, 500)\n  );\n}\n\nreturn [{ json: { facturaId } }];\n"
+      },
+      "id": "sacar-id",
+      "name": "Sacar el id de la factura",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.alegra.com/api/v1/bills/{{ $json.facturaId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "traer-factura",
+      "name": "Traer la factura completa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        320
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// De la factura que acaban de registrar sacamos lo que sirve para buscar\n// duplicados: el proveedor, el número y el monto.\n\nconst f = (items[0] && items[0].json) || {};\n\nconst nombreDe = (p) => {\n  const n = p && p.name;\n  if (Array.isArray(n)) return n.filter(Boolean).join(' ');\n  if (n && typeof n === 'object') return [n.firstName, n.lastName].filter(Boolean).join(' ');\n  return n || 'Proveedor sin nombre';\n};\n\nconst proveedor = f.provider || f.client || {};\nconst proveedorId = proveedor.id === undefined || proveedor.id === null ? '' : String(proveedor.id);\n\nif (!proveedorId) {\n  throw new Error(\n    'La factura ' + (f.id || '?') + ' no trae proveedor, así que no puedo buscar duplicados suyos.'\n  );\n}\n\nconst numeroDe = (x) =>\n  String(\n    (x.numberTemplate && x.numberTemplate.fullNumber) || x.billNumber || x.number || ''\n  );\n\nreturn [\n  {\n    json: {\n      facturaId: String(f.id),\n      numero: numeroDe(f),\n      proveedorId,\n      proveedor: nombreDe(proveedor),\n      fecha: f.date ? String(f.date).slice(0, 10) : '',\n      vence: f.dueDate ? String(f.dueDate).slice(0, 10) : '',\n      total: Number(f.total ?? 0),\n      moneda: (f.currency && f.currency.code) || 'COP',\n      observaciones: String(f.observations || f.anotation || ''),\n    },\n  },\n];\n"
+      },
+      "id": "preparar-busqueda",
+      "name": "Preparar la búsqueda",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/bills",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "={{ $json.proveedorId }}"
+            },
+            {
+              "name": "order_field",
+              "value": "date"
+            },
+            {
+              "name": "order_direction",
+              "value": "DESC"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "buscar-del-proveedor",
+      "name": "Traer las otras facturas del proveedor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1120,
+        320
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 facturas de proveedor por llamada, así que el nodo\n// anterior hace varias llamadas y entrega una página por cada una.\n// Aquí las abrimos para quedar con una factura por item.\n\nconst facturas = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    facturas.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    facturas.push(...cuerpo.data);\n  } else {\n    facturas.push(cuerpo);\n  }\n}\n\nreturn facturas.map((factura) => ({ json: factura }));\n"
+      },
+      "id": "separar-facturas",
+      "name": "Separar las facturas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst DIAS_DE_MARGEN = 5;        // ventana para buscar el mismo monto\nconst TOLERANCIA_MONTO = 0.01;   // 0.01 = 1% de diferencia todavía cuenta como igual\nconst MONEDA = 'COP';\n// ──────────────────────────────────────────────────────────────────────\n\nconst nueva = $('Preparar la búsqueda').first().json;\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst fecha = (d) => {\n  if (!d) return null;\n  const f = new Date(String(d).slice(0, 10) + 'T00:00:00');\n  return isNaN(f.getTime()) ? null : f;\n};\n\n// Para comparar números de factura: 'FC 001' y 'fc-001' son el mismo.\nconst normalizar = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n\nconst numeroDe = (x) =>\n  String((x.numberTemplate && x.numberTemplate.fullNumber) || x.billNumber || x.number || '');\n\nconst fechaNueva = fecha(nueva.fecha);\nconst numeroNuevo = normalizar(nueva.numero);\n\nconst sospechas = [];\n\nfor (const item of items) {\n  const otra = item.json;\n  if (!otra || String(otra.id) === String(nueva.facturaId)) continue;\n  // Una factura anulada ya no cuenta como duplicado.\n  if (String(otra.status || '').toLowerCase() === 'void') continue;\n\n  const numeroOtra = normalizar(numeroDe(otra));\n  const totalOtra = Number(otra.total ?? 0);\n  const fechaOtra = fecha(otra.date);\n\n  const mismoNumero = numeroNuevo !== '' && numeroOtra === numeroNuevo;\n\n  let mismoMonto = false;\n  let diasAparte = null;\n  if (!mismoNumero && nueva.total > 0 && fechaNueva && fechaOtra) {\n    diasAparte = Math.abs(Math.round((fechaOtra - fechaNueva) / 86400000));\n    const diferencia = Math.abs(totalOtra - nueva.total) / nueva.total;\n    mismoMonto = diasAparte <= DIAS_DE_MARGEN && diferencia <= TOLERANCIA_MONTO;\n  }\n\n  if (!mismoNumero && !mismoMonto) continue;\n\n  sospechas.push({\n    id: String(otra.id),\n    numero: numeroDe(otra) || '(sin número)',\n    fecha: otra.date ? String(otra.date).slice(0, 10) : '(sin fecha)',\n    total: totalOtra,\n    totalTexto: plata(totalOtra),\n    estado: String(otra.status || ''),\n    motivo: mismoNumero\n      ? 'tiene el mismo número'\n      : 'tiene el mismo monto y se registró ' +\n        (diasAparte === 0 ? 'el mismo día' : 'con ' + diasAparte + ' día' + (diasAparte === 1 ? '' : 's') + ' de diferencia'),\n    grave: mismoNumero,\n  });\n}\n\n// Primero las coincidencias por número, que son las más claras.\nsospechas.sort((a, b) => Number(b.grave) - Number(a.grave));\n\nconst hayDuplicado = sospechas.length > 0;\n\nlet mensaje = '';\nif (hayDuplicado) {\n  const grave = sospechas.some((s) => s.grave);\n  mensaje =\n    '<b>' + (grave ? 'Ojo: esta factura ya estaba' : 'Revisa esta factura antes de pagarla') + '</b>\\n\\n' +\n    'Acabas de registrar <b>' + (nueva.numero || '(sin número)') + '</b> de <b>' + nueva.proveedor + '</b>\\n' +\n    'por ' + plata(nueva.total) + ', con fecha ' + (nueva.fecha || '(sin fecha)') + '.\\n\\n' +\n    'Se parece a ' + (sospechas.length === 1 ? 'esta:' : 'estas ' + sospechas.length + ':') + '\\n' +\n    sospechas\n      .slice(0, 5)\n      .map((s) => '• <b>' + s.numero + '</b> del ' + s.fecha + ' por ' + s.totalTexto + ' — ' + s.motivo)\n      .join('\\n') +\n    (sospechas.length > 5 ? '\\n… y ' + (sospechas.length - 5) + ' más.' : '') +\n    '\\n\\nNo se borró nada. Entra a Alegra y decide cuál dejas.';\n}\n\nreturn [\n  {\n    json: {\n      hayDuplicado,\n      cantidad: sospechas.length,\n      sospechas,\n      mensaje,\n      facturaId: nueva.facturaId,\n      numero: nueva.numero,\n      proveedor: nueva.proveedor,\n      total: nueva.total,\n      fecha: nueva.fecha,\n    },\n  },\n];\n"
+      },
+      "id": "buscar-coincidencias",
+      "name": "Buscar coincidencias",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "hay-duplicado",
+              "leftValue": "={{ $json.hayDuplicado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "si-hay-duplicado",
+      "name": "¿Se parece a alguna?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "REEMPLAZAR_CHAT_ID",
+        "text": "={{ $json.mensaje }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "avisar-telegram",
+      "name": "Avisar por Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2240,
+        220
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cuando registras una factura de proveedor": {
+      "main": [
+        [
+          {
+            "node": "Sacar el id de la factura",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sacar el id de la factura": {
+      "main": [
+        [
+          {
+            "node": "Traer la factura completa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer la factura completa": {
+      "main": [
+        [
+          {
+            "node": "Preparar la búsqueda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar la búsqueda": {
+      "main": [
+        [
+          {
+            "node": "Traer las otras facturas del proveedor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer las otras facturas del proveedor": {
+      "main": [
+        [
+          {
+            "node": "Separar las facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar las facturas": {
+      "main": [
+        [
+          {
+            "node": "Buscar coincidencias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar coincidencias": {
+      "main": [
+        [
+          {
+            "node": "¿Se parece a alguna?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Se parece a alguna?": {
+      "main": [
+        [
+          {
+            "node": "Avisar por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

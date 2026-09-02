@@ -1,0 +1,415 @@
+{
+  "name": "Alegra — Facturación recurrente del mes",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Facturación recurrente del mes\n\nEl día 1 de cada mes lee tu lista de clientes fijos en Google Sheets, revisa cuáles ya tienen factura este mes y **crea las que faltan como borrador** en Alegra.\n\nDespués te manda un correo con qué creó y qué omitió.\n\n**Nada se emite solo.** Las facturas quedan en borrador; tú las revisas y las emites desde Alegra.\n\n**Antes de activarlo necesitas:**\n\n1. La credencial de Alegra en n8n, llamada exactamente `Alegra API`.\n2. La credencial de Google Sheets, llamada `Google Sheets account`.\n3. La credencial de Gmail, llamada `Gmail account`.\n4. Reemplazar `REEMPLAZAR_SPREADSHEET_ID` en el nodo \"Traer los clientes fijos\".\n5. Reemplazar `REEMPLAZAR_CORREO_DESTINO` en el nodo \"Enviar el resumen\".\n\nEl paso a paso completo está en el README de esta carpeta.",
+        "height": 520,
+        "width": 460,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Cómo debe verse tu hoja\n\nUna hoja llamada **Clientes fijos**, con estos títulos en la fila 1, escritos igual:\n\n`Cliente ID` · `Cliente` · `Producto ID` · `Producto` · `Precio` · `Cantidad` · `Días para pagar` · `Activo`\n\nUna fila por cada cosa que le facturas a cada cliente. Si a un cliente le facturas tres servicios, son tres filas con el mismo `Cliente ID`: el flujo las junta en **una sola factura**.\n\nEn `Activo` pon `Sí` para incluirlo. Cualquier otra cosa lo deja por fuera, sin borrar la fila.\n\nLos ID de cliente y de producto son los de Alegra. Están al final de la URL cuando abres el cliente o el producto.",
+        "height": 480,
+        "width": 460,
+        "color": 5
+      },
+      "id": "nota-hoja",
+      "name": "Cómo debe verse tu hoja",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Empieza en seco\n\nEl nodo **Crear la factura borrador** viene **desactivado a propósito**.\n\nAsí puedes correr el flujo una primera vez y ver en el correo exactamente qué *habría* creado, sin tocar nada en Alegra.\n\nCuando el resumen te cuadre: clic derecho en ese nodo → **Activate**.\n\nDe ahí en adelante crea las facturas, siempre en estado **borrador**.",
+        "height": 340,
+        "width": 400,
+        "color": 3
+      },
+      "id": "nota-seco",
+      "name": "Empieza en seco",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "monthsInterval": 1,
+              "triggerAtDayOfMonth": 1,
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "disparador-mensual",
+      "name": "El día 1 de cada mes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Clientes fijos"
+        },
+        "options": {
+          "returnAllMatches": "returnAllMatches"
+        }
+      },
+      "id": "traer-clientes-fijos",
+      "name": "Traer los clientes fijos",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        240,
+        240
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "date_after",
+              "value": "={{ $now.startOf('month').minus({ days: 1 }).toFormat('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-facturas-mes",
+      "name": "Traer facturas de este mes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        240
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 facturas por llamada, así que el nodo anterior\n// hace varias llamadas y entrega una página por cada una.\n// Aquí las abrimos para quedar con una factura por item.\n\nconst facturas = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    facturas.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    facturas.push(...cuerpo.data);\n  } else {\n    facturas.push(cuerpo);\n  }\n}\n\nreturn facturas.map((factura) => ({ json: factura }));"
+      },
+      "id": "separar-facturas",
+      "name": "Separar facturas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst FORMA_DE_PAGO = 'CREDIT';   // CREDIT = le das plazo. CASH = paga de contado\nconst METODO_DE_PAGO = 'CASH';    // cómo esperas que te pague\nconst DIAS_PARA_PAGAR = 30;       // se usa si la fila no trae \"Días para pagar\"\nconst MONEDA = 'COP';             // solo afecta cómo se ve la plata en el correo\n// ──────────────────────────────────────────────────────────────────────\n\nconst hoy = new Date();\nhoy.setHours(0, 0, 0, 0);\n\n// Formateamos la fecha a mano para que no se corra un día por la zona horaria.\nconst fecha = (d) =>\n  d.getFullYear() +\n  '-' + String(d.getMonth() + 1).padStart(2, '0') +\n  '-' + String(d.getDate()).padStart(2, '0');\n\nconst nombreMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)\n  .toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\n// ── Paso 1: quiénes ya tienen factura este mes ──\n// Así el flujo se puede correr dos veces sin duplicarle la factura a nadie.\nconst yaFacturados = new Set();\nfor (const item of items) {\n  const f = item.json;\n  const id = f.client && f.client.id;\n  if (id) yaFacturados.add(String(id));\n}\n\n// ── Paso 2: leer la hoja y juntar las filas de un mismo cliente ──\nconst esActivo = (v) => {\n  const s = String(v === undefined || v === null ? '' : v).trim().toLowerCase();\n  return s === 'sí' || s === 'si' || s === 'true' || s === 'x' || s === '1';\n};\n\nconst filas = $('Traer los clientes fijos').all().map((f) => f.json);\nconst grupos = new Map();\n\nfor (const fila of filas) {\n  if (!esActivo(fila['Activo'])) continue;\n\n  const clienteId = String(fila['Cliente ID'] ?? '').trim();\n  const productoId = String(fila['Producto ID'] ?? '').trim();\n  const precio = Number(fila['Precio'] ?? 0);\n  const cantidad = Number(fila['Cantidad'] ?? 1) || 1;\n\n  // Una fila sin cliente, sin producto o sin precio no alcanza para facturar.\n  if (!clienteId || !productoId || !(precio > 0)) continue;\n\n  if (!grupos.has(clienteId)) {\n    grupos.set(clienteId, {\n      clienteId,\n      cliente: String(fila['Cliente'] ?? '').trim() || 'Cliente ' + clienteId,\n      diasParaPagar: Number(fila['Días para pagar'] ?? 0) || DIAS_PARA_PAGAR,\n      lineas: [],\n    });\n  }\n\n  grupos.get(clienteId).lineas.push({\n    id: productoId,\n    name: String(fila['Producto'] ?? '').trim() || 'Producto ' + productoId,\n    price: precio,\n    quantity: cantidad,\n  });\n}\n\n// ── Paso 3: decidir, cliente por cliente ──\nconst salida = [];\n\nfor (const g of grupos.values()) {\n  const total = g.lineas.reduce((s, l) => s + l.price * l.quantity, 0);\n\n  const base = {\n    clienteId: g.clienteId,\n    cliente: g.cliente,\n    cantidadLineas: g.lineas.length,\n    total,\n    totalTexto: plata(total),\n    mes: nombreMes,\n  };\n\n  if (yaFacturados.has(g.clienteId)) {\n    salida.push({\n      ...base,\n      accion: 'omitir',\n      motivo: 'Ya tiene una factura este mes',\n    });\n    continue;\n  }\n\n  const vence = new Date(hoy);\n  vence.setDate(vence.getDate() + g.diasParaPagar);\n\n  salida.push({\n    ...base,\n    accion: 'crear',\n    // Este es el cuerpo exacto que se le manda a Alegra.\n    // status draft = borrador. No se emite nada solo.\n    factura: {\n      client: { id: g.clienteId },\n      date: fecha(hoy),\n      dueDate: fecha(vence),\n      status: 'draft',\n      paymentForm: FORMA_DE_PAGO,\n      paymentMethod: METODO_DE_PAGO,\n      items: g.lineas,\n      anotation:\n        'Facturación recurrente de ' + nombreMes + '. Creada como borrador.',\n    },\n  });\n}\n\n// Primero lo que hay que crear, y dentro de eso lo de mayor monto.\nsalida.sort((a, b) => {\n  if (a.accion !== b.accion) return a.accion === 'crear' ? -1 : 1;\n  return b.total - a.total;\n});\n\nreturn salida.map((s) => ({ json: s }));"
+      },
+      "id": "decidir-facturar",
+      "name": "Decidir a quién facturar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "hay-que-crearla",
+              "leftValue": "={{ $json.accion }}",
+              "rightValue": "crear",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "hay-que-crearla",
+      "name": "¿Hay que crearla?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.alegra.com/api/v1/invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.factura) }}",
+        "options": {}
+      },
+      "id": "crear-factura-borrador",
+      "name": "Crear la factura borrador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1440,
+        140
+      ],
+      "disabled": true,
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      },
+      "id": "juntar-resultados",
+      "name": "Juntar lo creado y lo omitido",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1700,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst MONEDA = 'COP';\n// ──────────────────────────────────────────────────────────────────────\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst hoy = new Date();\nconst nombreMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)\n  .toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });\n\n// Por aquí llegan tres cosas distintas:\n//  - lo que Alegra devolvió al crear la factura (trae id y numeración)\n//  - lo que iba a crearse pero el nodo está desactivado (sigue con accion 'crear')\n//  - lo que se omitió porque ya estaba facturado\nconst creadas = [];\nconst enSeco = [];\nconst omitidas = [];\nconst fallidas = [];\n\nfor (const item of items) {\n  const d = item.json;\n\n  if (d.accion === 'omitir') {\n    omitidas.push(d);\n  } else if (d.error) {\n    fallidas.push(d);\n  } else if (d.accion === 'crear') {\n    enSeco.push(d);\n  } else {\n    creadas.push(d);\n  }\n}\n\nconst nombreDe = (f) => (f.client && f.client.name) || 'Cliente sin nombre';\nconst numeroDe = (f) =>\n  (f.numberTemplate && f.numberTemplate.fullNumber) || 'sin numerar';\nconst totalDe = (f) => Number(f.total ?? 0);\n\nconst fila = (izq, der) =>\n  '<tr><td style=\"padding:4px 12px 4px 0\">' + izq +\n  '</td><td style=\"padding:4px 0\">' + der + '</td></tr>';\n\nconst partes = [];\nlet asunto;\n\nif (creadas.length > 0) {\n  const total = creadas.reduce((s, f) => s + totalDe(f), 0);\n  asunto =\n    'Facturación de ' + nombreMes + ' — ' + creadas.length + ' borrador(es) listos';\n  partes.push(\n    '<p>Ya quedaron creados <b>' + creadas.length + ' borrador(es)</b> en Alegra, ' +\n    'por un total de <b>' + plata(total) + '</b>. Revísalos y emítelos cuando quieras.</p>',\n    '<table>',\n    creadas.map((f) => fila(numeroDe(f) + ' — ' + nombreDe(f), plata(totalDe(f)))).join(''),\n    '</table>'\n  );\n} else if (enSeco.length > 0) {\n  const total = enSeco.reduce((s, d) => s + Number(d.total ?? 0), 0);\n  asunto =\n    'Facturación de ' + nombreMes + ' — prueba en seco, ' + enSeco.length + ' pendiente(s)';\n  partes.push(\n    '<p>Esto es una <b>prueba en seco</b>: el nodo que crea las facturas está desactivado, ' +\n    'así que en Alegra no se creó nada.</p>',\n    '<p>Si lo activas, se crearían <b>' + enSeco.length + ' borrador(es)</b> ' +\n    'por un total de <b>' + plata(total) + '</b>:</p>',\n    '<table>',\n    enSeco.map((d) =>\n      fila(d.cliente + ' (' + d.cantidadLineas + ' línea(s))', d.totalTexto)\n    ).join(''),\n    '</table>'\n  );\n} else {\n  asunto = 'Facturación de ' + nombreMes + ' — todo al día';\n  partes.push('<p>No quedó nada por facturar este mes. Todos tus clientes fijos ya tienen su factura.</p>');\n}\n\nif (omitidas.length > 0) {\n  partes.push(\n    '<p>Se omitieron <b>' + omitidas.length + '</b> porque ya tenían factura este mes:</p>',\n    '<table>',\n    omitidas.map((d) => fila(d.cliente, d.totalTexto)).join(''),\n    '</table>'\n  );\n}\n\nif (fallidas.length > 0) {\n  partes.push(\n    '<p><b>Ojo:</b> quedaron ' + fallidas.length + ' sin crear. ' +\n    'Abre la ejecución en n8n para ver qué pasó.</p>'\n  );\n}\n\npartes.push('<p style=\"color:#666;font-size:13px\">Ninguna de estas facturas está emitida. ' +\n  'Quedan en borrador en Alegra hasta que tú las revises.</p>');\n\nreturn [\n  {\n    json: {\n      asunto,\n      mensaje: partes.join('\\n'),\n      creadas: creadas.length,\n      enSeco: enSeco.length,\n      omitidas: omitidas.length,\n      fallidas: fallidas.length,\n    },\n  },\n];"
+      },
+      "id": "armar-resumen",
+      "name": "Armar el resumen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "REEMPLAZAR_CORREO_DESTINO",
+        "subject": "={{ $json.asunto }}",
+        "message": "={{ $json.mensaje }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "enviar-resumen",
+      "name": "Enviar el resumen",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2180,
+        240
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "El día 1 de cada mes": {
+      "main": [
+        [
+          {
+            "node": "Traer los clientes fijos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer los clientes fijos": {
+      "main": [
+        [
+          {
+            "node": "Traer facturas de este mes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer facturas de este mes": {
+      "main": [
+        [
+          {
+            "node": "Separar facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar facturas": {
+      "main": [
+        [
+          {
+            "node": "Decidir a quién facturar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir a quién facturar": {
+      "main": [
+        [
+          {
+            "node": "¿Hay que crearla?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay que crearla?": {
+      "main": [
+        [
+          {
+            "node": "Crear la factura borrador",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Juntar lo creado y lo omitido",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Crear la factura borrador": {
+      "main": [
+        [
+          {
+            "node": "Juntar lo creado y lo omitido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Juntar lo creado y lo omitido": {
+      "main": [
+        [
+          {
+            "node": "Armar el resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar el resumen": {
+      "main": [
+        [
+          {
+            "node": "Enviar el resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

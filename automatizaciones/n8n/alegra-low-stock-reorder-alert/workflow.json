@@ -1,0 +1,430 @@
+{
+  "name": "Alegra — Alerta de reposición",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Alerta de reposición\n\nCada mañana revisa tu inventario en Alegra, lo cruza con lo que vendiste el último mes y te dice **qué se te va a acabar antes de que se acabe**.\n\nArma el tablero en Notion y, si hay algo crítico, te manda un solo mensaje por Telegram.\n\n**Antes de activarlo necesitas:**\n\n1. La credencial de Alegra en n8n, llamada exactamente `Alegra API`.\n2. La credencial de Notion, llamada `Notion account`.\n3. La credencial de Telegram, llamada `Telegram account`.\n4. Reemplazar `REEMPLAZAR_DATABASE_ID` en el nodo \"Guardar en Notion\".\n5. Reemplazar `REEMPLAZAR_CHAT_ID` en el nodo \"Avisar por Telegram\".\n\nEl paso a paso completo está en el README de esta carpeta.",
+        "height": 480,
+        "width": 460,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Tu base de datos en Notion\n\nCrea una base de datos con estas columnas, con el nombre y el tipo **exactos**:\n\n| Columna | Tipo |\n|---|---|\n| Producto | Title |\n| Disponible | Number |\n| Mínimo | Number |\n| Sugerido pedir | Number |\n| Vendido 30 días | Number |\n| Días de cobertura | Number |\n| Costo de reposición | Number |\n| Estado | Select |\n| Bodega | Text |\n| Fecha de corte | Date |\n\nEn **Estado**, crea las opciones: `Agotado`, `Crítico`, `Bajo`.\n\n**No olvides compartir la base con tu integración de Notion.** Sin eso el flujo falla con un error 404.",
+        "height": 620,
+        "width": 420,
+        "color": 5
+      },
+      "id": "nota-notion",
+      "name": "Cómo debe verse tu base de Notion",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1800,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Si tus productos no tienen mínimo\n\nEs lo más común: en Alegra el campo **stock mínimo** casi nunca está diligenciado, y llega vacío.\n\nCuando eso pasa, el flujo usa el número que pongas en `MINIMO_POR_DEFECTO`, dentro del nodo \"Calcular qué reponer\".\n\nPero lo que de verdad te sirve es la columna **Días de cobertura**: sale de cruzar lo que te queda con lo que vendiste el último mes. Esa no depende de que hayas configurado nada.",
+        "height": 320,
+        "width": 400,
+        "color": 3
+      },
+      "id": "nota-minimos",
+      "name": "Si tus productos no tienen mínimo",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 6,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "id": "disparador-diario",
+      "name": "Cada día a las 6:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        40,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "inventory"
+            },
+            {
+              "name": "status",
+              "value": "active"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-productos",
+      "name": "Traer productos con inventario",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        280,
+        240
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 productos por llamada, así que el nodo anterior\n// hace varias llamadas y entrega una página por cada una.\n// Aquí las abrimos para quedar con un producto por item.\n\nconst productos = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    productos.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    productos.push(...cuerpo.data);\n  } else {\n    productos.push(cuerpo);\n  }\n}\n\nreturn productos.map((producto) => ({ json: producto }));"
+      },
+      "id": "separar-productos",
+      "name": "Separar productos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "date_after",
+              "value": "={{ $now.minus({ days: 30 }).toFormat('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-ventas",
+      "name": "Traer ventas del último mes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        760,
+        240
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mismo desdoble que con los productos: una página por item, la abrimos.\n\nconst facturas = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    facturas.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    facturas.push(...cuerpo.data);\n  } else {\n    facturas.push(cuerpo);\n  }\n}\n\nreturn facturas.map((factura) => ({ json: factura }));"
+      },
+      "id": "separar-ventas",
+      "name": "Separar facturas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst MINIMO_POR_DEFECTO = 5;    // se usa cuando el producto no tiene mínimo en Alegra\nconst DIAS_DE_VENTA = 30;        // ventana para medir qué tan rápido se vende\nconst COBERTURA_CRITICA = 7;     // días de inventario por debajo de los cuales es crítico\nconst DIAS_A_CUBRIR = 30;        // para cuántos días quieres pedir\nconst MONEDA = 'COP';            // solo afecta cómo se ve la plata en el aviso\n// ──────────────────────────────────────────────────────────────────────\n\n// Fecha de hoy armada a mano, para que no se corra un día por la zona horaria.\nconst hoy = new Date();\nconst fechaCorte =\n  hoy.getFullYear() +\n  '-' + String(hoy.getMonth() + 1).padStart(2, '0') +\n  '-' + String(hoy.getDate()).padStart(2, '0');\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\n// ── Paso 1: contar cuántas unidades se vendieron de cada producto ──\n// Las líneas de una factura pueden traer el id del producto de dos formas,\n// según la versión de la cuenta. Probamos ambas.\nconst vendidas = new Map();\n\nfor (const item of items) {\n  const factura = item.json;\n  const lineas = Array.isArray(factura.items) ? factura.items : [];\n  for (const linea of lineas) {\n    const id = String(linea.id ?? (linea.item && linea.item.id) ?? '');\n    if (!id) continue;\n    const cantidad = Number(linea.quantity ?? 0);\n    if (!(cantidad > 0)) continue;\n    vendidas.set(id, (vendidas.get(id) || 0) + cantidad);\n  }\n}\n\n// Si ninguna factura trajo el detalle de líneas, no podemos calcular\n// cobertura. El flujo sigue funcionando solo con el stock mínimo.\nconst hayDatosDeVenta = vendidas.size > 0;\n\n// ── Paso 2: revisar producto por producto ──\nconst productos = $('Separar productos').all();\nconst alertas = [];\n\nfor (const p of productos) {\n  const prod = p.json;\n  const inv = prod.inventory;\n\n  // Los servicios y todo lo que no maneje inventario no aplica.\n  if (!inv) continue;\n\n  const disponible = Number(inv.availableQuantity ?? 0);\n  const costoUnitario = Number(inv.unitCost ?? 0);\n\n  // El mínimo se configura por bodega y casi siempre viene vacío.\n  // Sumamos los que sí estén puestos; si no hay ninguno, usamos el de arriba.\n  const bodegas = Array.isArray(inv.warehouses) ? inv.warehouses : [];\n  const minimosPuestos = bodegas\n    .map((b) => b.minQuantity)\n    .filter((m) => m !== null && m !== undefined && m !== '')\n    .map(Number)\n    .filter((m) => !Number.isNaN(m));\n\n  const minimoConfigurado = minimosPuestos.length > 0;\n  const minimo = minimoConfigurado\n    ? minimosPuestos.reduce((a, b) => a + b, 0)\n    : MINIMO_POR_DEFECTO;\n\n  const vendido = vendidas.get(String(prod.id)) || 0;\n  const promedioDiario = vendido / DIAS_DE_VENTA;\n  const diasCobertura =\n    promedioDiario > 0 ? Math.floor(disponible / promedioDiario) : null;\n\n  // ── Paso 3: decidir si merece alerta y con qué urgencia ──\n  let estado = null;\n  if (disponible <= 0) {\n    estado = 'Agotado';\n  } else if (diasCobertura !== null && diasCobertura <= COBERTURA_CRITICA) {\n    estado = 'Crítico';\n  } else if (disponible < minimo) {\n    estado = 'Bajo';\n  }\n\n  if (!estado) continue;\n\n  // Cuánto pedir: lo que haga falta para llegar al mínimo, o para cubrir\n  // los próximos DIAS_A_CUBRIR al ritmo al que se está vendiendo.\n  const paraElMinimo = Math.max(minimo - disponible, 0);\n  const paraLaDemanda = Math.max(\n    Math.ceil(promedioDiario * DIAS_A_CUBRIR) - disponible,\n    0\n  );\n  const sugerido = Math.max(paraElMinimo, paraLaDemanda, 1);\n\n  const nombreBodega = bodegas.length\n    ? bodegas.map((b) => b.name).filter(Boolean).join(', ')\n    : 'Sin bodega';\n\n  alertas.push({\n    producto: prod.name || 'Producto sin nombre',\n    productoId: String(prod.id),\n    referencia: prod.reference || '',\n    disponible,\n    minimo,\n    minimoConfigurado,\n    sugerido,\n    vendido,\n    diasCobertura,\n    costoReposicion: Math.round(sugerido * costoUnitario),\n    costoTexto: plata(sugerido * costoUnitario),\n    estado,\n    bodega: nombreBodega,\n    hayDatosDeVenta,\n    fechaCorte,\n  });\n}\n\n// Lo más urgente arriba: primero lo agotado, luego lo de menos cobertura.\nconst peso = { Agotado: 0, 'Crítico': 1, Bajo: 2 };\nalertas.sort((a, b) => {\n  if (peso[a.estado] !== peso[b.estado]) return peso[a.estado] - peso[b.estado];\n  const ca = a.diasCobertura === null ? 9999 : a.diasCobertura;\n  const cb = b.diasCobertura === null ? 9999 : b.diasCobertura;\n  return ca - cb;\n});\n\nreturn alertas.map((a) => ({ json: a }));"
+      },
+      "id": "calcular-reposicion",
+      "name": "Calcular qué reponer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_DATABASE_ID"
+        },
+        "title": "={{ $json.producto }}",
+        "simple": true,
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Disponible|number",
+              "numberValue": "={{ $json.disponible }}"
+            },
+            {
+              "key": "Mínimo|number",
+              "numberValue": "={{ $json.minimo }}"
+            },
+            {
+              "key": "Sugerido pedir|number",
+              "numberValue": "={{ $json.sugerido }}"
+            },
+            {
+              "key": "Vendido 30 días|number",
+              "numberValue": "={{ $json.vendido }}"
+            },
+            {
+              "key": "Días de cobertura|number",
+              "numberValue": "={{ $json.diasCobertura }}"
+            },
+            {
+              "key": "Costo de reposición|number",
+              "numberValue": "={{ $json.costoReposicion }}"
+            },
+            {
+              "key": "Estado|select",
+              "selectValue": "={{ $json.estado }}"
+            },
+            {
+              "key": "Bodega|rich_text",
+              "richText": false,
+              "textContent": "={{ $json.bodega }}"
+            },
+            {
+              "key": "Fecha de corte|date",
+              "includeTime": false,
+              "date": "={{ $json.fechaCorte }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "guardar-en-notion",
+      "name": "Guardar en Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        1560,
+        120
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta todo en un solo mensaje. Si no hay nada urgente, no devuelve nada\n// y el nodo de Telegram sencillamente no corre.\n\n// Debe ser la misma moneda que pusiste en \"Calcular qué reponer\".\nconst MONEDA = 'COP';\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst urgentes = items\n  .map((i) => i.json)\n  .filter((a) => a.estado === 'Agotado' || a.estado === 'Crítico');\n\nif (urgentes.length === 0) return [];\n\nconst lineas = urgentes.slice(0, 20).map((a) => {\n  const cobertura =\n    a.diasCobertura === null\n      ? 'sin datos de venta'\n      : 'te alcanza para ' + a.diasCobertura + ' día(s)';\n  return (\n    '• <b>' + a.producto + '</b> — quedan ' + a.disponible + ', ' + cobertura +\n    '. Pedir ' + a.sugerido + ' (' + a.costoTexto + ')'\n  );\n});\n\nconst agotados = urgentes.filter((a) => a.estado === 'Agotado').length;\nconst total = urgentes.reduce((s, a) => s + a.costoReposicion, 0);\n\nconst encabezado =\n  agotados > 0\n    ? '<b>Tienes ' + agotados + ' producto(s) agotado(s)</b>'\n    : '<b>Se te está acabando el inventario</b>';\n\nconst partes = [\n  encabezado,\n  '',\n  ...lineas,\n];\n\nif (urgentes.length > 20) {\n  partes.push('', 'Y ' + (urgentes.length - 20) + ' más. Míralos en Notion.');\n}\n\npartes.push('', 'Reponer todo esto te cuesta cerca de ' + plata(total) + '.');\n\nreturn [{ json: { mensaje: partes.join('\\n'), cantidad: urgentes.length } }];"
+      },
+      "id": "armar-aviso",
+      "name": "Armar el aviso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "REEMPLAZAR_CHAT_ID",
+        "text": "={{ $json.mensaje }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "avisar-telegram",
+      "name": "Avisar por Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1800,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada día a las 6:30": {
+      "main": [
+        [
+          {
+            "node": "Traer productos con inventario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer productos con inventario": {
+      "main": [
+        [
+          {
+            "node": "Separar productos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar productos": {
+      "main": [
+        [
+          {
+            "node": "Traer ventas del último mes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer ventas del último mes": {
+      "main": [
+        [
+          {
+            "node": "Separar facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar facturas": {
+      "main": [
+        [
+          {
+            "node": "Calcular qué reponer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular qué reponer": {
+      "main": [
+        [
+          {
+            "node": "Guardar en Notion",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Armar el aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar el aviso": {
+      "main": [
+        [
+          {
+            "node": "Avisar por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

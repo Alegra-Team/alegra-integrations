@@ -1,0 +1,267 @@
+{
+  "name": "Alegra — Radar de cartera en Notion",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Radar de cartera en Notion\n\nCada mañana revisa todas tus facturas abiertas en Alegra, calcula cuántos días de mora tiene cada una, las agrupa por cliente y arma un tablero en Notion ordenado por a quién cobrar primero.\n\n**Antes de activarlo necesitas:**\n\n1. La credencial de Alegra en n8n, llamada exactamente `Alegra API`.\n2. La credencial de Notion, llamada `Notion account`.\n3. Una base de datos en Notion con las columnas que aparecen en la nota amarilla de la derecha.\n4. Reemplazar `REEMPLAZAR_DATABASE_ID` en el nodo \"Guardar en Notion\".\n\nEl paso a paso completo está en el README de esta carpeta.",
+        "height": 420,
+        "width": 460,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Tu base de datos en Notion\n\nCrea una base de datos con estas columnas, con el nombre y el tipo **exactos**:\n\n| Columna | Tipo |\n|---|---|\n| Cliente | Title |\n| Saldo total | Number |\n| Vencido | Number |\n| 1 a 30 días | Number |\n| 31 a 60 días | Number |\n| Más de 60 días | Number |\n| Días de mora | Number |\n| Prioridad | Number |\n| Estado | Select |\n| Detalle | Text |\n| Fecha de corte | Date |\n\nEn **Estado**, crea las opciones: `Al día`, `Mora leve`, `Mora seria`, `Crítico`.\n\n**No olvides compartir la base con tu integración de Notion.** Es el error más común: sin eso el flujo falla con un error 404.",
+        "height": 620,
+        "width": 420,
+        "color": 5
+      },
+      "id": "nota-notion",
+      "name": "Cómo debe verse tu base de Notion",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "disparador-diario",
+      "name": "Cada día a las 7:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        40,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "open"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-facturas",
+      "name": "Traer facturas abiertas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        280,
+        180
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 facturas por llamada, así que el nodo anterior\n// hace varias llamadas y entrega una página por cada una.\n// Aquí las abrimos para quedar con una factura por item.\n\nconst facturas = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    facturas.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    facturas.push(...cuerpo.data);\n  } else {\n    facturas.push(cuerpo);\n  }\n}\n\nreturn facturas.map((factura) => ({ json: factura }));"
+      },
+      "id": "separar-facturas",
+      "name": "Separar facturas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst DIAS_GRACIA = 0;   // días de gracia antes de empezar a contar mora\nconst MONEDA = 'COP';    // solo afecta cómo se ve la plata en el detalle\n// ──────────────────────────────────────────────────────────────────────\n\nconst hoy = new Date();\nhoy.setHours(0, 0, 0, 0);\nconst fechaCorte = hoy.toISOString().slice(0, 10);\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\n// El nombre del cliente llega distinto según el país. Lo normalizamos.\nconst nombreDe = (cliente) => {\n  const n = cliente && cliente.name;\n  if (Array.isArray(n)) return n.filter(Boolean).join(' ');\n  if (n && typeof n === 'object') return [n.firstName, n.lastName].filter(Boolean).join(' ');\n  return n || 'Cliente sin nombre';\n};\n\nconst numeroDe = (f) =>\n  String((f.numberTemplate && f.numberTemplate.fullNumber) || f.number || f.id);\n\nconst estadoDe = (dias) => {\n  if (dias <= 0) return 'Al día';\n  if (dias <= 30) return 'Mora leve';\n  if (dias <= 60) return 'Mora seria';\n  return 'Crítico';\n};\n\nconst porCliente = new Map();\n\nfor (const item of items) {\n  const f = item.json;\n\n  // El saldo pendiente viene en 'balance'. Si esa cuenta no lo trae,\n  // lo deducimos del total menos lo ya pagado.\n  const saldo = Number(\n    f.balance ?? Number(f.total ?? 0) - Number(f.totalPaid ?? 0)\n  );\n  if (!(saldo > 0)) continue;\n\n  const cliente = f.client || {};\n  const clave = String(cliente.id ?? nombreDe(cliente));\n\n  let mora = 0;\n  if (f.dueDate) {\n    const vence = new Date(f.dueDate + 'T00:00:00');\n    mora = Math.floor((hoy - vence) / 86400000) - DIAS_GRACIA;\n  }\n\n  if (!porCliente.has(clave)) {\n    porCliente.set(clave, {\n      cliente: nombreDe(cliente),\n      saldoTotal: 0,\n      vencido: 0,\n      tramo1a30: 0,\n      tramo31a60: 0,\n      tramoMas60: 0,\n      diasMora: 0,\n      cantidad: 0,\n      lineas: [],\n    });\n  }\n\n  const c = porCliente.get(clave);\n  c.saldoTotal += saldo;\n  c.cantidad += 1;\n\n  if (mora > 0) {\n    c.vencido += saldo;\n    if (mora <= 30) c.tramo1a30 += saldo;\n    else if (mora <= 60) c.tramo31a60 += saldo;\n    else c.tramoMas60 += saldo;\n  }\n\n  if (mora > c.diasMora) c.diasMora = mora;\n\n  c.lineas.push(\n    numeroDe(f) +\n      ': ' +\n      plata(saldo) +\n      (mora > 0 ? ' — ' + mora + ' días de mora' : ' — aún no vence')\n  );\n}\n\nconst salida = [...porCliente.values()]\n  .filter((c) => c.vencido > 0)\n  .map((c) => ({\n    cliente: c.cliente,\n    saldoTotal: Math.round(c.saldoTotal),\n    vencido: Math.round(c.vencido),\n    tramo1a30: Math.round(c.tramo1a30),\n    tramo31a60: Math.round(c.tramo31a60),\n    tramoMas60: Math.round(c.tramoMas60),\n    diasMora: c.diasMora,\n    estado: estadoDe(c.diasMora),\n    // Prioridad: pesa la plata vencida por los días que lleva vencida.\n    prioridad: Math.round((c.vencido * Math.max(c.diasMora, 1)) / 1000),\n    detalle: (c.cantidad + ' factura(s) pendiente(s):\\n' + c.lineas.join('\\n')).slice(0, 1900),\n    fechaCorte,\n  }))\n  .sort((a, b) => b.prioridad - a.prioridad);\n\nreturn salida.map((c) => ({ json: c }));"
+      },
+      "id": "agrupar-por-cliente",
+      "name": "Calcular mora y agrupar por cliente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_DATABASE_ID"
+        },
+        "title": "={{ $json.cliente }}",
+        "simple": true,
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Saldo total|number",
+              "numberValue": "={{ $json.saldoTotal }}"
+            },
+            {
+              "key": "Vencido|number",
+              "numberValue": "={{ $json.vencido }}"
+            },
+            {
+              "key": "1 a 30 días|number",
+              "numberValue": "={{ $json.tramo1a30 }}"
+            },
+            {
+              "key": "31 a 60 días|number",
+              "numberValue": "={{ $json.tramo31a60 }}"
+            },
+            {
+              "key": "Más de 60 días|number",
+              "numberValue": "={{ $json.tramoMas60 }}"
+            },
+            {
+              "key": "Días de mora|number",
+              "numberValue": "={{ $json.diasMora }}"
+            },
+            {
+              "key": "Prioridad|number",
+              "numberValue": "={{ $json.prioridad }}"
+            },
+            {
+              "key": "Estado|select",
+              "selectValue": "={{ $json.estado }}"
+            },
+            {
+              "key": "Detalle|rich_text",
+              "richText": false,
+              "textContent": "={{ $json.detalle }}"
+            },
+            {
+              "key": "Fecha de corte|date",
+              "includeTime": false,
+              "date": "={{ $json.fechaCorte }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "guardar-en-notion",
+      "name": "Guardar en Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        180
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada día a las 7:00": {
+      "main": [
+        [
+          {
+            "node": "Traer facturas abiertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer facturas abiertas": {
+      "main": [
+        [
+          {
+            "node": "Separar facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar facturas": {
+      "main": [
+        [
+          {
+            "node": "Calcular mora y agrupar por cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular mora y agrupar por cliente": {
+      "main": [
+        [
+          {
+            "node": "Guardar en Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,346 @@
+{
+  "name": "Alegra — Guardián de anomalías en facturas",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Guardián de anomalías en facturas\n\nCada vez que creas o editas una factura de venta, este flujo la revisa contra seis reglas y te avisa por Telegram solo si algo no cuadra.\n\n**No cambia nada en Alegra.** Solo te avisa.\n\n**Necesita n8n accesible desde internet** (n8n Cloud o un servidor con dominio), porque depende de un webhook que Alegra tiene que poder alcanzar.\n\n**Antes de activarlo necesitas:**\n\n1. La credencial de Alegra en n8n, llamada exactamente `Alegra API`.\n2. La credencial de Telegram, llamada `Telegram account`.\n3. Reemplazar `REEMPLAZAR_CHAT_ID` en el nodo \"Avisar por Telegram\".\n4. Activar el flujo y registrar su **Production URL** en Alegra para los eventos `new-invoice` y `edit-invoice`.\n\nEl paso a paso completo está en el README de esta carpeta.",
+        "height": 480,
+        "width": 440,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -540,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Las seis reglas\n\n1. El cliente no tiene identificación.\n2. Hay un descuento por encima de tu tope.\n3. La factura vale mucho más de lo que ese cliente suele comprar.\n4. Es la primera factura del cliente y ya es de monto alto.\n5. La factura no tiene ítems, o quedó en cero.\n6. La fecha de vencimiento es anterior a la de emisión.\n\nLos cuatro umbrales se cambian arriba del nodo **Revisar la factura**.\n\nSi no dispara ninguna regla, **no te llega nada**.",
+        "height": 400,
+        "width": 420,
+        "color": 5
+      },
+      "id": "nota-reglas",
+      "name": "Las seis reglas",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alegra-factura-venta",
+        "responseMode": "onReceived",
+        "options": {
+          "responseData": "recibido"
+        }
+      },
+      "id": "disparador-webhook",
+      "name": "Cuando creas o editas una factura",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra no documenta la forma exacta de lo que manda el webhook, así que aquí\n// no confiamos en ella: buscamos el id donde pueda venir y con ese id volvemos\n// a preguntarle a Alegra la factura completa.\n\nconst crudo = (items[0] && items[0].json) || {};\nconst cuerpo = crudo.body !== undefined ? crudo.body : crudo;\nconst base = Array.isArray(cuerpo) ? cuerpo[0] || {} : cuerpo;\n\nconst posibles = [\n  base.id,\n  base.invoiceId,\n  base.idInvoice,\n  base.data && base.data.id,\n  base.invoice && base.invoice.id,\n  base.resource && base.resource.id,\n  base.payload && base.payload.id,\n];\n\nconst facturaId = posibles\n  .map((v) => (v === undefined || v === null ? '' : String(v).trim()))\n  .find((v) => v !== '');\n\nif (!facturaId) {\n  throw new Error(\n    'No encontré el id de la factura en lo que mandó Alegra. Esto fue lo que llegó: ' +\n      JSON.stringify(cuerpo).slice(0, 500)\n  );\n}\n\nreturn [{ json: { facturaId } }];\n"
+      },
+      "id": "sacar-id",
+      "name": "Sacar el id de la factura",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.alegra.com/api/v1/invoices/{{ $json.facturaId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "traer-factura",
+      "name": "Traer la factura completa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        320
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Dejamos la factura en un formato parejo para poder revisarla, y sacamos el id\n// del cliente para ir a traer su historial.\n\nconst f = (items[0] && items[0].json) || {};\n\nconst nombreDe = (p) => {\n  const n = p && p.name;\n  if (Array.isArray(n)) return n.filter(Boolean).join(' ');\n  if (n && typeof n === 'object') return [n.firstName, n.lastName].filter(Boolean).join(' ');\n  return n || 'Cliente sin nombre';\n};\n\nconst cliente = f.client || {};\n\n// La identificación llega como texto suelto o dentro de identificationObject.\nconst identificacion = String(\n  cliente.identification ||\n    (cliente.identificationObject && cliente.identificationObject.number) ||\n    ''\n).trim();\n\nconst lineas = (Array.isArray(f.items) ? f.items : []).map((it) => {\n  const precio = Number(\n    typeof it.price === 'object' && it.price !== null ? it.price.price : it.price\n  ) || 0;\n  const cantidad = Number(it.quantity ?? 0);\n  const descuento = Number(it.discount ?? 0);\n  return {\n    nombre: String(it.name || it.reference || 'Ítem sin nombre'),\n    precio,\n    cantidad,\n    descuento,\n    bruto: precio * cantidad,\n  };\n});\n\nreturn [\n  {\n    json: {\n      facturaId: String(f.id),\n      numero: String((f.numberTemplate && f.numberTemplate.fullNumber) || f.number || f.id),\n      // Si la factura no trae cliente usamos 0, que no existe: el historial\n      // llega vacío y el flujo sigue con las demás revisiones.\n      clienteId:\n        cliente.id === undefined || cliente.id === null || cliente.id === ''\n          ? '0'\n          : String(cliente.id),\n      cliente: nombreDe(cliente),\n      identificacion,\n      fecha: f.date ? String(f.date).slice(0, 10) : '',\n      vence: f.dueDate ? String(f.dueDate).slice(0, 10) : '',\n      total: Number(f.total ?? 0),\n      estado: String(f.status || ''),\n      moneda: (f.currency && f.currency.code) || 'COP',\n      lineas,\n    },\n  },\n];\n"
+      },
+      "id": "preparar-revision",
+      "name": "Preparar la revisión",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "={{ $json.clienteId }}"
+            },
+            {
+              "name": "order_field",
+              "value": "date"
+            },
+            {
+              "name": "order_direction",
+              "value": "DESC"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-historial",
+      "name": "Traer el historial del cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1120,
+        320
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 facturas de proveedor por llamada, así que el nodo\n// anterior hace varias llamadas y entrega una página por cada una.\n// Aquí las abrimos para quedar con una factura por item.\n\nconst facturas = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    facturas.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    facturas.push(...cuerpo.data);\n  } else {\n    facturas.push(cuerpo);\n  }\n}\n\nreturn facturas.map((factura) => ({ json: factura }));\n"
+      },
+      "id": "separar-facturas",
+      "name": "Separar las facturas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst DESCUENTO_MAXIMO = 20;        // porcentaje de descuento que ya te parece mucho\nconst VECES_SOBRE_EL_PROMEDIO = 3;  // 3 = avisa si la factura vale 3 veces lo normal\nconst MINIMO_HISTORIAL = 3;         // facturas anteriores que hacen falta para comparar\nconst TOPE_CLIENTE_NUEVO = 5000000; // monto alto para un cliente sin historial\nconst MONEDA = 'COP';\n// ──────────────────────────────────────────────────────────────────────\n\nconst f = $('Preparar la revisión').first().json;\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst fecha = (d) => {\n  if (!d) return null;\n  const x = new Date(String(d).slice(0, 10) + 'T00:00:00');\n  return isNaN(x.getTime()) ? null : x;\n};\n\n// El historial del cliente, sin contar esta misma factura ni las anuladas.\nconst historial = items\n  .map((i) => i.json)\n  .filter(\n    (x) =>\n      x &&\n      String(x.id) !== String(f.facturaId) &&\n      String(x.status || '').toLowerCase() !== 'void'\n  )\n  .map((x) => Number(x.total ?? 0))\n  .filter((t) => t > 0);\n\nconst promedio = historial.length\n  ? historial.reduce((s, t) => s + t, 0) / historial.length\n  : 0;\n\nconst alertas = [];\n\n// 1. Cliente sin identificación. Sin eso la factura no sirve para nada tributario.\nif (!f.identificacion) {\n  alertas.push('El cliente no tiene identificación registrada.');\n}\n\n// 2. Descuento alto en alguna línea.\nconst conDescuento = f.lineas.filter((l) => l.descuento > DESCUENTO_MAXIMO);\nif (conDescuento.length) {\n  alertas.push(\n    'Descuento del ' +\n      Math.max(...conDescuento.map((l) => l.descuento)) +\n      '% en ' +\n      (conDescuento.length === 1\n        ? '\"' + conDescuento[0].nombre + '\"'\n        : conDescuento.length + ' ítems') +\n      '. Tu tope es ' + DESCUENTO_MAXIMO + '%.'\n  );\n}\n\n// 3. Monto muy por encima de lo que este cliente suele comprar.\nif (historial.length >= MINIMO_HISTORIAL && promedio > 0) {\n  const veces = f.total / promedio;\n  if (veces >= VECES_SOBRE_EL_PROMEDIO) {\n    alertas.push(\n      'Vale ' + veces.toFixed(1) + ' veces lo que este cliente suele comprar (' +\n        plata(promedio) + ' en promedio de ' + historial.length + ' facturas).'\n    );\n  }\n}\n\n// 4. Cliente sin historial y monto alto.\nif (historial.length === 0 && f.total >= TOPE_CLIENTE_NUEVO) {\n  alertas.push(\n    'Es la primera factura de este cliente y ya va por ' + plata(f.total) + '.'\n  );\n}\n\n// 5. Factura sin ítems o en cero.\nif (!f.lineas.length) {\n  alertas.push('La factura no tiene ítems.');\n} else if (!(f.total > 0)) {\n  alertas.push('La factura quedó en cero.');\n}\n\n// 6. Vence antes de emitirse. Casi siempre es un dedazo en la fecha.\nconst emitida = fecha(f.fecha);\nconst vence = fecha(f.vence);\nif (emitida && vence && vence < emitida) {\n  alertas.push('La fecha de vencimiento (' + f.vence + ') es anterior a la de emisión (' + f.fecha + ').');\n}\n\nconst hayAlerta = alertas.length > 0;\n\nlet mensaje = '';\nif (hayAlerta) {\n  mensaje =\n    '<b>Revisa esta factura</b>\\n\\n' +\n    '<b>' + f.numero + '</b> — ' + f.cliente + '\\n' +\n    plata(f.total) + ' · ' + (f.fecha || 'sin fecha') + ' · ' + (f.estado || 'sin estado') + '\\n\\n' +\n    alertas.map((a) => '• ' + a).join('\\n') +\n    '\\n\\nNo se cambió nada. Ábrela en Alegra si algo no cuadra.';\n}\n\nreturn [\n  {\n    json: {\n      hayAlerta,\n      cantidad: alertas.length,\n      alertas,\n      mensaje,\n      facturaId: f.facturaId,\n      numero: f.numero,\n      cliente: f.cliente,\n      total: f.total,\n      promedioCliente: Math.round(promedio),\n      facturasAnteriores: historial.length,\n    },\n  },\n];\n"
+      },
+      "id": "revisar-factura",
+      "name": "Revisar la factura",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "hay-alerta",
+              "leftValue": "={{ $json.hayAlerta }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "si-hay-alerta",
+      "name": "¿Algo no cuadra?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "REEMPLAZAR_CHAT_ID",
+        "text": "={{ $json.mensaje }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "avisar-telegram",
+      "name": "Avisar por Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2240,
+        220
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cuando creas o editas una factura": {
+      "main": [
+        [
+          {
+            "node": "Sacar el id de la factura",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sacar el id de la factura": {
+      "main": [
+        [
+          {
+            "node": "Traer la factura completa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer la factura completa": {
+      "main": [
+        [
+          {
+            "node": "Preparar la revisión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar la revisión": {
+      "main": [
+        [
+          {
+            "node": "Traer el historial del cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer el historial del cliente": {
+      "main": [
+        [
+          {
+            "node": "Separar las facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar las facturas": {
+      "main": [
+        [
+          {
+            "node": "Revisar la factura",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revisar la factura": {
+      "main": [
+        [
+          {
+            "node": "¿Algo no cuadra?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Algo no cuadra?": {
+      "main": [
+        [
+          {
+            "node": "Avisar por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

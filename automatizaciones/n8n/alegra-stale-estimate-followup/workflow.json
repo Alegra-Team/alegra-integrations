@@ -1,0 +1,477 @@
+{
+  "name": "Alegra — Seguimiento a cotizaciones frías",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Seguimiento a cotizaciones frías\n\nEste flujo hace dos cosas.\n\n**Arriba:** cada lunes te manda por correo las cotizaciones que llevan más de 15 días sin convertirse en factura. Las que se te están enfriando.\n\n**Abajo:** te deja un formulario. Escribes el número de una cotización y te la convierte en **factura borrador** en Alegra.\n\n**Antes de activarlo necesitas:**\n\n1. La credencial de Alegra en n8n, llamada exactamente `Alegra API`.\n2. La credencial de Gmail, llamada `Gmail account`.\n3. Reemplazar `REEMPLAZAR_CORREO_DESTINO` en el nodo \"Enviar la lista\".\n\nEl paso a paso completo está en el README de esta carpeta.",
+        "height": 460,
+        "width": 440,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -520,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Cada lunes: la lista de frías\n\nTrae todas tus cotizaciones abiertas, descarta las que ya se convirtieron en factura y te manda las que llevan tiempo quietas.\n\nSolo lee. No toca nada en Alegra.",
+        "height": 260,
+        "width": 380,
+        "color": 5
+      },
+      "id": "nota-semanal",
+      "name": "Rama de arriba",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## El formulario: convertir una\n\nEl nodo **Crear la factura borrador** viene **desactivado a propósito**.\n\nCórrelo así la primera vez: el formulario te dice qué *habría* creado, sin tocar Alegra.\n\nCuando te cuadre, clic derecho en ese nodo → **Activate**. De ahí en adelante crea la factura, siempre en estado **borrador**.\n\nLa dirección del formulario sale al abrir el nodo \"Convertir una cotización\". Ojo: la URL de prueba solo sirve mientras tienes el flujo abierto y le diste **Test workflow**. La de producción funciona cuando el flujo está activo.",
+        "height": 420,
+        "width": 420,
+        "color": 3
+      },
+      "id": "nota-formulario",
+      "name": "Rama de abajo",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1420,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "disparador-lunes",
+      "name": "Cada lunes a las 8:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        20,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/estimates",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "open"
+            },
+            {
+              "name": "fields",
+              "value": "invoices"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-cotizaciones",
+      "name": "Traer cotizaciones abiertas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        260,
+        140
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 cotizaciones por llamada, así que el nodo anterior\n// hace varias llamadas y entrega una página por cada una.\n// Aquí las abrimos para quedar con una cotización por item.\n\nconst cotizaciones = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    cotizaciones.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    cotizaciones.push(...cuerpo.data);\n  } else {\n    cotizaciones.push(cuerpo);\n  }\n}\n\nreturn cotizaciones.map((cotizacion) => ({ json: cotizacion }));"
+      },
+      "id": "separar-cotizaciones",
+      "name": "Separar cotizaciones",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst DIAS_PARA_ENFRIARSE = 15;   // desde cuántos días sin respuesta te avisa\nconst MONTO_MINIMO = 0;           // ignora las cotizaciones por debajo de este monto\nconst MONEDA = 'COP';\n// ──────────────────────────────────────────────────────────────────────\n\nconst hoy = new Date();\nhoy.setHours(0, 0, 0, 0);\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst frias = [];\n\nfor (const item of items) {\n  const c = item.json;\n\n  // Si Alegra nos dijo qué facturas salieron de esta cotización y hay al menos\n  // una, ya se convirtió y no hay nada que perseguir.\n  if (Array.isArray(c.invoices) && c.invoices.length > 0) continue;\n\n  if (!c.date) continue;\n  // La fecha viene como '2026-08-01'. Sin la hora, JavaScript la lee en UTC y\n  // en Colombia queda corrida un día.\n  const emitida = new Date(String(c.date).slice(0, 10) + 'T00:00:00');\n  if (isNaN(emitida.getTime())) continue;\n\n  const dias = Math.floor((hoy - emitida) / 86400000);\n  if (dias < DIAS_PARA_ENFRIARSE) continue;\n\n  const total = Number(c.total ?? 0);\n  if (total < MONTO_MINIMO) continue;\n\n  frias.push({\n    id: String(c.id ?? ''),\n    numero:\n      (c.numberTemplate && c.numberTemplate.fullNumber) ||\n      String(c.number ?? c.id ?? 'sin número'),\n    cliente: (c.client && c.client.name) || 'Cliente sin nombre',\n    fecha: c.date,\n    dias,\n    total,\n    totalTexto: plata(total),\n  });\n}\n\n// Si no hay ninguna fría, no devolvemos nada y el correo no sale.\nif (frias.length === 0) return [];\n\n// La plata más grande arriba: es la que más vale la pena perseguir.\nfrias.sort((a, b) => b.total - a.total);\n\nconst total = frias.reduce((s, f) => s + f.total, 0);\n\nconst filas = frias\n  .map(\n    (f) =>\n      '<tr>' +\n      '<td style=\"padding:4px 12px 4px 0\">' + f.numero + '</td>' +\n      '<td style=\"padding:4px 12px 4px 0\">' + f.cliente + '</td>' +\n      '<td style=\"padding:4px 12px 4px 0\"><b>' + f.totalTexto + '</b></td>' +\n      '<td style=\"padding:4px 0\">hace ' + f.dias + ' días</td>' +\n      '</tr>'\n  )\n  .join('');\n\nconst mensaje = [\n  '<p>Tienes <b>' + frias.length + ' cotización(es)</b> que llevan más de ' +\n    DIAS_PARA_ENFRIARSE + ' días sin convertirse en factura, ' +\n    'por un total de <b>' + plata(total) + '</b>.</p>',\n  '<table>' + filas + '</table>',\n  '<p>Empieza por la de arriba: es la que más plata te representa.</p>',\n  '<p style=\"color:#666;font-size:13px\">Para convertir una en factura borrador, ' +\n    'abre el formulario de este mismo flujo y escribe su número.</p>',\n].join('\\n');\n\nreturn [\n  {\n    json: {\n      asunto:\n        frias.length === 1\n          ? 'Una cotización se está enfriando: ' + frias[0].numero\n          : frias.length + ' cotizaciones se están enfriando',\n      mensaje,\n      cantidad: frias.length,\n      total,\n      totalTexto: plata(total),\n    },\n  },\n];"
+      },
+      "id": "buscar-frias",
+      "name": "Buscar las frías",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        740,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "REEMPLAZAR_CORREO_DESTINO",
+        "subject": "={{ $json.asunto }}",
+        "message": "={{ $json.mensaje }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "enviar-lista",
+      "name": "Enviar la lista",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        980,
+        140
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "formTitle": "Convertir una cotización en factura",
+        "formDescription": "Escribe el número de la cotización tal como aparece en Alegra. Te la dejamos como factura borrador para que la revises antes de emitirla.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Número de la cotización",
+              "fieldName": "numero",
+              "fieldType": "text",
+              "placeholder": "COT-0042",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Convertir en borrador"
+        }
+      },
+      "id": "formulario-convertir",
+      "name": "Convertir una cotización",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        20,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/estimates",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $json.numero }}"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "buscar-cotizacion",
+      "name": "Buscar la cotización",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        260,
+        620
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst FORMA_DE_PAGO = 'CREDIT';   // CREDIT = le das plazo. CASH = paga de contado\nconst METODO_DE_PAGO = 'CASH';\nconst DIAS_PARA_PAGAR = 30;       // plazo de la factura que se crea\nconst MONEDA = 'COP';\n// ──────────────────────────────────────────────────────────────────────\n\nconst numeroPedido = String(\n  $('Convertir una cotización').first().json.numero ?? ''\n).trim();\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst noSePudo = (motivo) => [\n  { json: { ok: false, numero: numeroPedido, motivo, factura: null } },\n];\n\n// ── Juntar lo que devolvió Alegra ──\nconst encontradas = [];\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    encontradas.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    encontradas.push(...cuerpo.data);\n  } else if (cuerpo && cuerpo.id) {\n    encontradas.push(cuerpo);\n  }\n}\n\nif (encontradas.length === 0) {\n  return noSePudo(\n    'No encontré ninguna cotización con el número ' + numeroPedido +\n    '. Revisa que esté escrito igual que en Alegra.'\n  );\n}\n\nconst c = encontradas[0];\n\nconst clienteId = c.client && c.client.id;\nif (!clienteId) {\n  return noSePudo(\n    'La cotización ' + numeroPedido + ' no tiene un cliente asociado en Alegra.'\n  );\n}\n\n// ── Pasar las líneas de la cotización a líneas de factura ──\n// El precio puede venir como número o como objeto, según la cuenta.\nconst precioDe = (l) => {\n  if (typeof l.price === 'number') return l.price;\n  if (l.price && typeof l.price.price === 'number') return l.price.price;\n  return Number(l.price ?? 0);\n};\n\nconst lineas = (Array.isArray(c.items) ? c.items : [])\n  .map((l) => {\n    const linea = {\n      id: String(l.id ?? (l.item && l.item.id) ?? ''),\n      name: String(l.name ?? (l.item && l.item.name) ?? 'Ítem'),\n      price: Number(precioDe(l)) || 0,\n      quantity: Number(l.quantity ?? 1) || 1,\n    };\n    if (Number(l.discount ?? 0) > 0) linea.discount = Number(l.discount);\n    if (l.tax && l.tax.id) linea.tax = { id: String(l.tax.id) };\n    else if (Array.isArray(l.tax) && l.tax[0] && l.tax[0].id) {\n      linea.tax = { id: String(l.tax[0].id) };\n    }\n    return linea;\n  })\n  .filter((l) => l.id && l.price > 0 && l.quantity > 0);\n\nif (lineas.length === 0) {\n  return noSePudo(\n    'La cotización ' + numeroPedido + ' no tiene ítems que se puedan facturar.'\n  );\n}\n\n// ── Armar la factura ──\nconst hoy = new Date();\nconst fecha = (d) =>\n  d.getFullYear() +\n  '-' + String(d.getMonth() + 1).padStart(2, '0') +\n  '-' + String(d.getDate()).padStart(2, '0');\n\nconst vence = new Date(hoy);\nvence.setDate(vence.getDate() + DIAS_PARA_PAGAR);\n\nconst numeroReal =\n  (c.numberTemplate && c.numberTemplate.fullNumber) ||\n  String(c.number ?? c.id);\n\nconst total = lineas.reduce((s, l) => s + l.price * l.quantity, 0);\n\nreturn [\n  {\n    json: {\n      ok: true,\n      numero: numeroReal,\n      cotizacionId: String(c.id),\n      cliente: (c.client && c.client.name) || 'Cliente sin nombre',\n      cantidadLineas: lineas.length,\n      total,\n      totalTexto: plata(total),\n      // Este es el cuerpo exacto que se le manda a Alegra.\n      // status draft = borrador. No se emite nada solo.\n      factura: {\n        client: { id: String(clienteId) },\n        date: fecha(hoy),\n        dueDate: fecha(vence),\n        status: 'draft',\n        paymentForm: FORMA_DE_PAGO,\n        paymentMethod: METODO_DE_PAGO,\n        items: lineas,\n        anotation: 'Creada desde la cotización ' + numeroReal + '. Queda en borrador.',\n      },\n    },\n  },\n];"
+      },
+      "id": "armar-factura",
+      "name": "Armar la factura desde la cotización",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "la-encontre",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "la-encontre",
+      "name": "¿La encontré?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        740,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.alegra.com/api/v1/invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.factura) }}",
+        "options": {}
+      },
+      "id": "crear-factura-borrador",
+      "name": "Crear la factura borrador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1000,
+        520
+      ],
+      "disabled": true,
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      },
+      "id": "juntar-resultado",
+      "name": "Juntar el resultado",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1240,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lo que este nodo devuelva es lo que ve la persona en la página del formulario.\n\nconst MONEDA = 'COP';\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst d = (items[0] && items[0].json) || {};\n\n// No se pudo armar la factura: el nodo anterior explicó por qué.\nif (d.ok === false) {\n  return [{ json: { resultado: 'No se pudo', mensaje: d.motivo } }];\n}\n\n// Alegra devolvió un error al crear.\nif (d.error) {\n  return [\n    {\n      json: {\n        resultado: 'No se pudo',\n        mensaje:\n          'Alegra rechazó la factura. Abre la ejecución en n8n para ver el detalle.',\n      },\n    },\n  ];\n}\n\n// El nodo que crea la factura está desactivado: esto fue una prueba en seco.\nif (d.ok === true) {\n  return [\n    {\n      json: {\n        resultado: 'Prueba en seco',\n        mensaje:\n          'No se creó nada en Alegra porque el nodo \"Crear la factura borrador\" está desactivado. ' +\n          'Si lo activas, la cotización ' + d.numero + ' de ' + d.cliente +\n          ' se convertiría en una factura borrador de ' + d.totalTexto +\n          ' con ' + d.cantidadLineas + ' línea(s).',\n      },\n    },\n  ];\n}\n\n// Caso normal: Alegra devolvió la factura creada.\nconst numero =\n  (d.numberTemplate && d.numberTemplate.fullNumber) || 'sin numerar';\nconst cliente = (d.client && d.client.name) || 'tu cliente';\n\nreturn [\n  {\n    json: {\n      resultado: 'Listo',\n      mensaje:\n        'La factura ' + numero + ' de ' + cliente + ' por ' +\n        plata(Number(d.total ?? 0)) +\n        ' quedó creada en Alegra como borrador. Revísala allá y emítela cuando quieras.',\n    },\n  },\n];"
+      },
+      "id": "contarte-como-quedo",
+      "name": "Contarte cómo quedó",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1480,
+        620
+      ]
+    }
+  ],
+  "connections": {
+    "Cada lunes a las 8:00": {
+      "main": [
+        [
+          {
+            "node": "Traer cotizaciones abiertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer cotizaciones abiertas": {
+      "main": [
+        [
+          {
+            "node": "Separar cotizaciones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar cotizaciones": {
+      "main": [
+        [
+          {
+            "node": "Buscar las frías",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar las frías": {
+      "main": [
+        [
+          {
+            "node": "Enviar la lista",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convertir una cotización": {
+      "main": [
+        [
+          {
+            "node": "Buscar la cotización",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar la cotización": {
+      "main": [
+        [
+          {
+            "node": "Armar la factura desde la cotización",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar la factura desde la cotización": {
+      "main": [
+        [
+          {
+            "node": "¿La encontré?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿La encontré?": {
+      "main": [
+        [
+          {
+            "node": "Crear la factura borrador",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Juntar el resultado",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Crear la factura borrador": {
+      "main": [
+        [
+          {
+            "node": "Juntar el resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Juntar el resultado": {
+      "main": [
+        [
+          {
+            "node": "Contarte cómo quedó",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

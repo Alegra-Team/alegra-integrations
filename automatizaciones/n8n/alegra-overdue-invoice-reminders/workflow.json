@@ -1,0 +1,361 @@
+{
+  "name": "Alegra — Recordatorios de cobro",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Recordatorios de cobro\n\nCada día hábil a las 8:00 revisa tus facturas vencidas, junta todas las de un mismo cliente en **un solo correo** y lo deja listo en tus borradores de Gmail.\n\nTú abres Gmail, lees, y le das enviar. Sin escribir nada.\n\n**Antes de activarlo necesitas:**\n\n1. La credencial de Alegra en n8n, llamada exactamente `Alegra API`.\n2. La credencial de Gmail, llamada `Gmail account`.\n3. Reemplazar `REEMPLAZAR_NOMBRE_DE_TU_EMPRESA` en el nodo \"Redactar el correo\".\n\nEl paso a paso completo está en el README de esta carpeta.",
+        "height": 460,
+        "width": 460,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Borrador o envío directo\n\nDe fábrica el flujo **deja el correo en borradores**. Nada sale de tu cuenta sin que tú lo leas.\n\nCuando ya confíes en cómo quedan los correos y quieras que salgan solos:\n\n1. Abre el nodo **Dejar el correo en borradores** y desactívalo (clic derecho → Deactivate).\n2. Abre el nodo **Enviar el correo directo** y actívalo.\n\nSon dos clics y se puede devolver igual de fácil.\n\n**Ojo:** el nodo de envío directo le escribe a tus clientes de verdad. Pruébalo primero con una factura tuya.",
+        "height": 460,
+        "width": 420,
+        "color": 3
+      },
+      "id": "nota-envio",
+      "name": "Borrador o envío directo",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1660,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "disparador-habiles",
+      "name": "Días hábiles a las 8:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        40,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "open"
+            },
+            {
+              "name": "dueDate_before",
+              "value": "={{ $now.minus({ days: 0 }).toFormat('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-vencidas",
+      "name": "Traer facturas vencidas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        280,
+        200
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 facturas por llamada, así que el nodo anterior\n// hace varias llamadas y entrega una página por cada una.\n// Aquí las abrimos para quedar con una factura por item.\n\nconst facturas = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    facturas.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    facturas.push(...cuerpo.data);\n  } else {\n    facturas.push(cuerpo);\n  }\n}\n\nreturn facturas.map((factura) => ({ json: factura }));"
+      },
+      "id": "separar-facturas",
+      "name": "Separar facturas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst MONEDA = 'COP';           // solo afecta cómo se ve la plata en el correo\nconst MINIMO_PARA_COBRAR = 0;   // no escribas por deudas menores a este monto\n// ──────────────────────────────────────────────────────────────────────\n\nconst hoy = new Date();\nhoy.setHours(0, 0, 0, 0);\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\n// El nombre del cliente llega distinto según el país. Lo normalizamos.\nconst nombreDe = (cliente) => {\n  const n = cliente && cliente.name;\n  if (Array.isArray(n)) return n.filter(Boolean).join(' ');\n  if (n && typeof n === 'object') return [n.firstName, n.lastName].filter(Boolean).join(' ');\n  return n || 'Cliente sin nombre';\n};\n\nconst numeroDe = (f) =>\n  String((f.numberTemplate && f.numberTemplate.fullNumber) || f.number || f.id);\n\nconst porCliente = new Map();\n\nfor (const item of items) {\n  const f = item.json;\n\n  // El saldo pendiente viene en 'balance'. Si esa cuenta no lo trae,\n  // lo deducimos del total menos lo ya pagado.\n  const saldo = Number(\n    f.balance ?? Number(f.total ?? 0) - Number(f.totalPaid ?? 0)\n  );\n  if (!(saldo > 0)) continue;\n  if (!f.dueDate) continue;\n\n  const vence = new Date(f.dueDate + 'T00:00:00');\n  const mora = Math.floor((hoy - vence) / 86400000);\n  if (mora <= 0) continue;\n\n  const cliente = f.client || {};\n  const clienteId = cliente.id;\n  // Sin id de cliente no podemos ir a buscar su correo. La saltamos.\n  if (!clienteId) continue;\n\n  const clave = String(clienteId);\n\n  if (!porCliente.has(clave)) {\n    porCliente.set(clave, {\n      clienteId: clave,\n      cliente: nombreDe(cliente),\n      totalVencido: 0,\n      cantidad: 0,\n      diasMoraMax: 0,\n      facturas: [],\n    });\n  }\n\n  const c = porCliente.get(clave);\n  c.totalVencido += saldo;\n  c.cantidad += 1;\n  if (mora > c.diasMoraMax) c.diasMoraMax = mora;\n  c.facturas.push({\n    numero: numeroDe(f),\n    saldo: Math.round(saldo),\n    saldoTexto: plata(saldo),\n    vence: f.dueDate,\n    mora,\n  });\n}\n\nconst salida = [...porCliente.values()]\n  .filter((c) => c.totalVencido >= MINIMO_PARA_COBRAR)\n  .map((c) => ({\n    ...c,\n    totalVencido: Math.round(c.totalVencido),\n    totalTexto: plata(c.totalVencido),\n    // La más vieja primero: es la que más pesa en la conversación.\n    facturas: c.facturas.sort((a, b) => b.mora - a.mora),\n  }))\n  .sort((a, b) => b.totalVencido - a.totalVencido);\n\nreturn salida.map((c) => ({ json: c }));"
+      },
+      "id": "agrupar-vencidas",
+      "name": "Agrupar vencidas por cliente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.alegra.com/api/v1/contacts/{{ $json.clienteId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "traer-contacto",
+      "name": "Buscar el correo del cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1000,
+        200
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst REMITENTE = 'REEMPLAZAR_NOMBRE_DE_TU_EMPRESA';\n// ──────────────────────────────────────────────────────────────────────\n\n// El nodo anterior pidió un contacto por cada cliente y devuelve las\n// respuestas en el mismo orden. Por eso emparejamos por posición.\nconst agrupado = $('Agrupar vencidas por cliente').all();\n\nconst salida = items.map((item, i) => {\n  const contacto = item.json || {};\n  const datos = agrupado[i].json;\n\n  // El correo llega como texto, como lista o dentro de un objeto,\n  // según el país y cómo se haya cargado el contacto.\n  let correo = contacto.email;\n  if (Array.isArray(correo)) correo = correo[0];\n  if (correo && typeof correo === 'object') correo = correo.email;\n  correo = typeof correo === 'string' ? correo.trim() : '';\n\n  const plural =\n    datos.cantidad === 1\n      ? 'una factura pendiente'\n      : datos.cantidad + ' facturas pendientes';\n\n  const filas = datos.facturas\n    .map(\n      (f) =>\n        '<tr>' +\n        '<td style=\"padding:6px 16px 6px 0;\">' + f.numero + '</td>' +\n        '<td style=\"padding:6px 16px 6px 0;text-align:right;white-space:nowrap;\">' + f.saldoTexto + '</td>' +\n        '<td style=\"padding:6px 0;color:#555;\">venció el ' + f.vence + ' (' + f.mora + ' días)</td>' +\n        '</tr>'\n    )\n    .join('');\n\n  const mensaje = [\n    '<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#222;line-height:1.5;\">',\n    '<p>Hola, ' + datos.cliente + ':</p>',\n    '<p>Te escribimos para recordarte que tienes ' + plural + ' con nosotros, por un total de <strong>' + datos.totalTexto + '</strong>.</p>',\n    '<table style=\"border-collapse:collapse;margin:16px 0;\">' + filas + '</table>',\n    '<p>Si ya hiciste el pago, cuéntanos y lo cruzamos de una vez.</p>',\n    '<p>Si necesitas otra fecha o armar un acuerdo, escríbenos y lo miramos juntos.</p>',\n    '<p>Gracias por tu confianza.<br>' + REMITENTE + '</p>',\n    '</div>',\n  ].join('');\n\n  const asunto =\n    datos.cantidad === 1\n      ? 'Recordatorio de pago — factura ' + datos.facturas[0].numero\n      : 'Recordatorio de pago — ' + datos.cantidad + ' facturas pendientes';\n\n  return {\n    json: {\n      cliente: datos.cliente,\n      clienteId: datos.clienteId,\n      correo,\n      tieneCorreo: correo.length > 0,\n      asunto,\n      mensaje,\n      totalVencido: datos.totalVencido,\n      totalTexto: datos.totalTexto,\n      cantidad: datos.cantidad,\n      diasMoraMax: datos.diasMoraMax,\n    },\n  };\n});\n\nreturn salida;"
+      },
+      "id": "redactar-correo",
+      "name": "Redactar el correo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "tiene-correo",
+              "leftValue": "={{ $json.tieneCorreo }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "revisar-correo",
+      "name": "¿Tiene correo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1480,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{ $json.asunto }}",
+        "emailType": "html",
+        "message": "={{ $json.mensaje }}",
+        "options": {
+          "sendTo": "={{ $json.correo }}"
+        }
+      },
+      "id": "dejar-borrador",
+      "name": "Dejar el correo en borradores",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1720,
+        100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Redactar el correo').item.json.correo }}",
+        "subject": "={{ $('Redactar el correo').item.json.asunto }}",
+        "emailType": "html",
+        "message": "={{ $('Redactar el correo').item.json.mensaje }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "enviar-directo",
+      "name": "Enviar el correo directo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        100
+      ],
+      "disabled": true,
+      "retryOnFail": false,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Días hábiles a las 8:00": {
+      "main": [
+        [
+          {
+            "node": "Traer facturas vencidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer facturas vencidas": {
+      "main": [
+        [
+          {
+            "node": "Separar facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar facturas": {
+      "main": [
+        [
+          {
+            "node": "Agrupar vencidas por cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agrupar vencidas por cliente": {
+      "main": [
+        [
+          {
+            "node": "Buscar el correo del cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar el correo del cliente": {
+      "main": [
+        [
+          {
+            "node": "Redactar el correo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redactar el correo": {
+      "main": [
+        [
+          {
+            "node": "¿Tiene correo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Tiene correo?": {
+      "main": [
+        [
+          {
+            "node": "Dejar el correo en borradores",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Dejar el correo en borradores": {
+      "main": [
+        [
+          {
+            "node": "Enviar el correo directo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

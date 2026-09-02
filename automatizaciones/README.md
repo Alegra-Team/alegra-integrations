@@ -1,50 +1,116 @@
 # Automatizaciones
 
-**Flujos de n8n listos para descargar, importar y poner a correr con tus datos de Alegra.**
+**Diez flujos de n8n listos para descargar, importar y poner a correr con tus datos de
+Alegra.**
 
-> **Próximamente.** Esta sección está en construcción. Las [skills](../skills/) ya están disponibles.
+Una skill responde cuando le preguntas. Una automatización trabaja sola: corre a una hora,
+o reacciona a algo que pasó, revisa tus datos y te avisa.
 
-## Qué va a haber aquí
+**¿Primera vez?** → **[Empezar aquí](EMPEZAR-AQUI.md)**. En 15 minutos tienes la primera
+corriendo.
 
-Una skill responde cuando le preguntas. Una automatización trabaja sola: corre a una hora, revisa tus datos y te avisa cuando algo pasa.
+---
 
-Cada flujo va a traer:
+## Para tu negocio
 
-- **`workflow.json`** — el archivo que importas en n8n.
-- **`README.md`** — qué hace, qué necesitas configurar y cómo se ve el resultado.
+| Flujo | Qué hace | Cuándo corre | Destino |
+|---|---|---|---|
+| **[Radar de cartera en Notion](n8n/alegra-receivables-aging-to-notion/)** | Te arma un tablero con quién te debe, cuánto y hace cuántos días, ordenado por prioridad. | Diario, 7:00 | Notion |
+| **[Recordatorios de cobro](n8n/alegra-overdue-invoice-reminders/)** | Un solo correo por cliente con todas sus facturas vencidas, listo para revisar antes de enviarlo. | L-V, 8:00 | Gmail |
+| **[Alerta de reposición](n8n/alegra-low-stock-reorder-alert/)** | Qué productos están por acabarse, con cuántos días de cobertura te quedan según lo que vendiste. | Diario, 6:30 | Notion + Telegram |
+| **[Facturación recurrente del mes](n8n/alegra-monthly-recurring-billing-run/)** | Crea las facturas de tus clientes fijos en borrador, sin repetir las que ya existen. | Día 1 | Gmail |
+| **[Seguimiento a cotizaciones frías](n8n/alegra-stale-estimate-followup/)** | Qué cotizaciones nunca se volvieron factura, y un formulario para convertir la que quieras. | Semanal + a mano | Gmail |
+| **[Bienvenida a un cliente nuevo](n8n/alegra-new-client-onboarding/)** | Apenas registras un cliente, te dice qué datos le faltan y le arma la ficha. | Al crear un cliente | Notion + Gmail |
 
-## Los flujos previstos
+## Para tu contabilidad
 
-### Para tu negocio
+| Flujo | Qué hace | Cuándo corre | Destino |
+|---|---|---|---|
+| **[Calendario de pagos](n8n/alegra-payables-calendar/)** | Todo lo que hay que pagar en 15 días, ordenado por urgencia y sumado por semana. | Lunes, 7:00 | Sheets + Gmail |
+| **[Guardián de facturas duplicadas](n8n/alegra-duplicate-bill-guard/)** | Cuando entra una factura de proveedor, revisa si ya registraste una igual. | Al registrar una compra | Telegram |
+| **[Guardián de anomalías](n8n/alegra-invoice-anomaly-guard/)** | Revisa cada factura de venta contra seis reglas y te avisa solo si algo no cuadra. | Al crear o editar una venta | Telegram |
+| **[Checklist de cierre de mes](n8n/alegra-month-close-checklist/)** | Todo lo que quedó pendiente del mes que cerró, con qué hacer con cada cosa. | Día 1 | Sheets + Gmail |
 
-| Flujo | Qué hace | Cuándo corre |
-|---|---|---|
-| **Resumen diario de caja** | Te manda por WhatsApp o correo cuánta plata tienes, qué entra y qué sale hoy. | Cada mañana |
-| **Alerta de cartera vencida** | Te avisa cuando una factura pasa a mora y te arma el mensaje de cobro. | Diario |
-| **Aviso de stock bajo** | Te notifica qué productos llegaron al mínimo, antes de que se acaben. | Diario |
-| **Reporte semanal de ventas** | Un resumen del cierre de la semana contra la anterior. | Lunes en la mañana |
-| **Recordatorio de pagos por vencer** | Te avisa qué le debes a proveedores esta semana. | Lunes en la mañana |
-| **Cierre de caja al correo** | Envía el reporte del turno de POS apenas se cierra. | Al cerrar turno |
+**Auxiliar:** **[Registrar un webhook](n8n/_registrar-webhook/)** — conecta los tres flujos
+que reaccionan a eventos, sin abrir una terminal.
 
-### Para tu contabilidad
+---
 
-| Flujo | Qué hace | Cuándo corre |
-|---|---|---|
-| **Alerta de resolución por vencerse** | Te avisa con tiempo cuando una resolución o numeración se acerca al límite. | Semanal |
-| **Chequeo previo al cierre** | Corre el checklist de cierre y te manda lo que está bloqueando el mes. | Fin de mes |
-| **Recordatorio de conciliación pendiente** | Te avisa de conciliaciones en borrador y movimientos sin conciliar. | Semanal |
-| **Informe mensual para tu cliente** | Arma el resumen financiero del mes y lo envía por correo. | Primer día del mes |
+## Qué necesitas
 
-Los nombres y el alcance pueden cambiar. Si quieres uno en particular o tienes una idea mejor, **[proponla en un issue](https://github.com/Alegra-Team/alegra-integrations/issues/new/choose)**.
+| | |
+|---|---|
+| **Una cuenta de n8n** | En la nube o instalada. Los siete flujos por horario funcionan igual en las dos. Los tres por evento necesitan que Alegra pueda alcanzar tu n8n desde internet |
+| **Tu token de Alegra** | Se saca en dos minutos: [cómo](OBTENER-TOKEN-ALEGRA.md) |
+| **El destino** | Notion, Google Sheets, Gmail o Telegram, según el flujo: [cuál necesita cuál](CREDENCIALES.md) |
 
-## Qué vas a necesitar
+---
 
-- Una instancia de **n8n** (en la nube o propia).
-- El **MCP de Alegra** o la API de Alegra con tu token.
-- El canal por donde quieres recibir el aviso: correo, WhatsApp, Slack, Telegram.
+## Las guías
 
-El paso a paso completo va a estar en cada flujo cuando se publique.
+| | |
+|---|---|
+| **[Empezar aquí](EMPEZAR-AQUI.md)** | La ruta de 15 minutos, de cero a un flujo corriendo |
+| **[Obtener tu token de Alegra](OBTENER-TOKEN-ALEGRA.md)** | Dónde está, cómo se conecta y cómo se cuida |
+| **[Credenciales](CREDENCIALES.md)** | Notion, Google Sheets, Gmail y Telegram, una ficha cada uno |
+| **[Cómo importar un flujo](COMO-IMPORTAR.md)** | Los cinco pasos, y qué hacer si algo falla |
+| **[Conectar los webhooks de Alegra](CONECTAR-WEBHOOKS-ALEGRA.md)** | Para los tres flujos que reaccionan a eventos |
 
-## Mientras tanto
+---
 
-Las [15 skills](../skills/) ya funcionan y responden estas mismas preguntas cuando se las haces. Empieza por **[Primeros pasos con el MCP](../skills/alegra-mcp-starter/)**.
+## Qué las hace distintas
+
+Alegra ya se conecta con muchas herramientas, pero casi siempre en un solo paso: pasa esto,
+haz aquello. Estas diez hacen lo que ese modelo no puede:
+
+- **Traen todo, no los primeros 30.** Alegra entrega máximo 30 registros por consulta. Todos
+  estos flujos piden página por página hasta completar.
+- **Agregan y calculan.** Días de mora, promedio histórico de un cliente, días de cobertura
+  de inventario, totales por semana. No solo mueven datos: los interpretan.
+- **Cruzan endpoints.** El seguimiento a cotizaciones sabe cuáles se convirtieron porque
+  compara cotizaciones contra facturas. Alegra no expone ese dato directamente.
+- **Consolidan.** El recordatorio de cobro manda **un** correo por cliente con todas sus
+  facturas, no un correo por factura.
+
+---
+
+## Seguridad
+
+**Ningún `workflow.json` de esta carpeta contiene un token, una clave, un correo real ni el
+id de un documento tuyo.** Las credenciales se referencian solo por nombre —`Alegra API`—,
+que es un rótulo que n8n resuelve contra su propio almacén cifrado.
+
+Lo que sí tienen son marcadores explícitos: `REEMPLAZAR_DATABASE_ID`,
+`REEMPLAZAR_SPREADSHEET_ID`, `REEMPLAZAR_CORREO_DESTINO`, `REEMPLAZAR_CHAT_ID`.
+
+Antes de subir cualquier flujo aquí hay que correr:
+
+```
+node scripts/revisar-flujos.js
+node scripts/sanitize-workflow.js --check automatizaciones/n8n/*/workflow.json
+```
+
+El primero revisa que el flujo esté bien armado; el segundo, que no se haya colado ningún
+secreto. Los dos corren también en CI y bloquean el pull request si algo falla.
+
+### Los flujos que escriben en Alegra
+
+Tres de los diez crean o modifican cosas. Todos con la misma protección:
+
+- **El nodo que escribe viene desactivado.** La primera corrida te muestra qué *habría*
+  hecho, sin hacer nada.
+- **Nunca reintenta.** Un reintento automático crearía documentos duplicados.
+- **Las facturas quedan en borrador.** Nada se emite sin que una persona lo revise en
+  Alegra.
+
+---
+
+## Falta algo que necesitas
+
+**[Propónlo en un issue](https://github.com/Alegra-Team/alegra-integrations/issues/new/choose)**.
+Y si quieres aportar un flujo, mira **[CONTRIBUIR.md](../CONTRIBUIR.md)**.
+
+## También te sirve
+
+Las **[15 skills](../skills/)** responden estas mismas preguntas cuando se las haces, sin
+programar nada. Empieza por **[Primeros pasos con el MCP](../skills/alegra-mcp-starter/)**.

@@ -1,0 +1,563 @@
+{
+  "name": "Alegra — Checklist de cierre de mes",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Checklist de cierre de mes\n\nEl día 1 de cada mes revisa el mes que acaba de cerrar y te dice qué falta: facturas sin cobrar, borradores sin emitir, compras sin pagar y clientes sin identificación.\n\nLo deja en una hoja de Google y te lo manda por correo.\n\n**No escribe nada en Alegra.** Solo lee.\n\n**Antes de activarlo necesitas:**\n\n1. La credencial de Alegra en n8n, llamada exactamente `Alegra API`.\n2. La credencial de Google Sheets, llamada `Google Sheets account`.\n3. La credencial de Gmail, llamada `Gmail account`.\n4. Reemplazar `REEMPLAZAR_SPREADSHEET_ID` en el nodo \"Guardar el checklist\".\n5. Reemplazar `REEMPLAZAR_CORREO_DESTINO` en el nodo \"Mandar el checklist\".\n\nEl paso a paso completo está en el README de esta carpeta.",
+        "height": 480,
+        "width": 440,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -540,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Cómo debe verse tu hoja\n\nCrea una hoja de cálculo en Google con una pestaña llamada **Cierre de mes** y esta primera fila, escrita igual:\n\n`Clave` · `Mes` · `Tipo` · `Documento` · `Contacto` · `Fecha` · `Vence` · `Dias` · `Monto` · `Que hacer` · `Revisado`\n\nLa columna **Clave** es la que evita filas repetidas si vuelves a correr el flujo.\n\nLa columna **Revisado** llega en `No`. Márcala a mano a medida que resuelves; el flujo no la vuelve a tocar mientras la fila siga igual.\n\nEl `REEMPLAZAR_SPREADSHEET_ID` es el pedazo de la URL entre `/d/` y `/edit`.",
+        "height": 400,
+        "width": 440,
+        "color": 5
+      },
+      "id": "nota-hoja",
+      "name": "Cómo debe verse tu hoja",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1700,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "monthsInterval": 1,
+              "triggerAtDayOfMonth": 1,
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "disparador-mensual",
+      "name": "El día 1 de cada mes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// El flujo corre el día 1. El mes que acaba de cerrar es el anterior.\n\nconst hoy = new Date();\nhoy.setHours(0, 0, 0, 0);\n\n// Primer y último día del mes pasado.\nconst desde = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);\nconst hasta = new Date(hoy.getFullYear(), hoy.getMonth(), 0);\n\nconst p = (n) => String(n).padStart(2, '0');\nconst aTexto = (f) => f.getFullYear() + '-' + p(f.getMonth() + 1) + '-' + p(f.getDate());\n\nconst MESES = [\n  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',\n  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',\n];\n\nreturn [\n  {\n    json: {\n      desde: aTexto(desde),\n      hasta: aTexto(hasta),\n      mes: desde.getFullYear() + '-' + p(desde.getMonth() + 1),\n      mesTexto: MESES[desde.getMonth()] + ' de ' + desde.getFullYear(),\n      hoy: aTexto(hoy),\n    },\n  },\n];\n"
+      },
+      "id": "calcular-mes",
+      "name": "Calcular el mes que cerró",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "open"
+            },
+            {
+              "name": "order_field",
+              "value": "date"
+            },
+            {
+              "name": "order_direction",
+              "value": "DESC"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-ventas-abiertas",
+      "name": "Traer las ventas sin cobrar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        200
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "draft"
+            },
+            {
+              "name": "order_field",
+              "value": "date"
+            },
+            {
+              "name": "order_direction",
+              "value": "DESC"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-borradores",
+      "name": "Traer las ventas en borrador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        420
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/bills",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "open"
+            },
+            {
+              "name": "order_field",
+              "value": "date"
+            },
+            {
+              "name": "order_direction",
+              "value": "DESC"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-compras-abiertas",
+      "name": "Traer las compras sin pagar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        640
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 por llamada, así que el nodo anterior hace varias\n// llamadas y entrega una página por cada una. Aquí las abrimos para quedar con\n// un documento por item, y le ponemos una marca para saber de dónde salió.\n\nconst documentos = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    documentos.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    documentos.push(...cuerpo.data);\n  } else {\n    documentos.push(cuerpo);\n  }\n}\n\nreturn documentos.map((doc) => ({ json: { ...doc, _origen: 'venta-abierta' } }));\n"
+      },
+      "id": "separar-ventas",
+      "name": "Separar las ventas sin cobrar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 por llamada, así que el nodo anterior hace varias\n// llamadas y entrega una página por cada una. Aquí las abrimos para quedar con\n// un documento por item, y le ponemos una marca para saber de dónde salió.\n\nconst documentos = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    documentos.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    documentos.push(...cuerpo.data);\n  } else {\n    documentos.push(cuerpo);\n  }\n}\n\nreturn documentos.map((doc) => ({ json: { ...doc, _origen: 'borrador' } }));\n"
+      },
+      "id": "separar-borradores",
+      "name": "Separar los borradores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 por llamada, así que el nodo anterior hace varias\n// llamadas y entrega una página por cada una. Aquí las abrimos para quedar con\n// un documento por item, y le ponemos una marca para saber de dónde salió.\n\nconst documentos = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    documentos.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    documentos.push(...cuerpo.data);\n  } else {\n    documentos.push(cuerpo);\n  }\n}\n\nreturn documentos.map((doc) => ({ json: { ...doc, _origen: 'compra-abierta' } }));\n"
+      },
+      "id": "separar-compras",
+      "name": "Separar las compras sin pagar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 3
+      },
+      "id": "juntar-todo",
+      "name": "Juntar todo",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1120,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst MONEDA = 'COP';\nconst INCLUIR_MESES_ANTERIORES = true; // también lo que quedó colgado de antes\n// ──────────────────────────────────────────────────────────────────────\n\nconst periodo = $('Calcular el mes que cerró').first().json;\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst fecha = (d) => {\n  if (!d) return null;\n  const f = new Date(String(d).slice(0, 10) + 'T00:00:00');\n  return isNaN(f.getTime()) ? null : f;\n};\n\nconst nombreDe = (p) => {\n  const n = p && p.name;\n  if (Array.isArray(n)) return n.filter(Boolean).join(' ');\n  if (n && typeof n === 'object') return [n.firstName, n.lastName].filter(Boolean).join(' ');\n  return n || 'Sin nombre';\n};\n\nconst numeroDe = (x) =>\n  String(\n    (x.numberTemplate && x.numberTemplate.fullNumber) ||\n      x.billNumber ||\n      x.number ||\n      x.id\n  );\n\nconst saldoDe = (x) => Number(x.balance ?? Number(x.total ?? 0) - Number(x.totalPaid ?? 0));\n\nconst desde = fecha(periodo.desde);\nconst hasta = fecha(periodo.hasta);\nconst hoy = fecha(periodo.hoy);\n\nconst delMes = (x) => {\n  const f = fecha(x.date);\n  return f && f >= desde && f <= hasta;\n};\nconst anterior = (x) => {\n  const f = fecha(x.date);\n  return f && f < desde;\n};\n\nconst todos = items.map((i) => i.json);\nconst ventasAbiertas = todos.filter((x) => x._origen === 'venta-abierta');\nconst borradores = todos.filter((x) => x._origen === 'borrador');\nconst comprasAbiertas = todos.filter((x) => x._origen === 'compra-abierta');\n\nconst filas = [];\n\nconst agregar = (tipo, doc, contacto, queHacer) => {\n  const vence = fecha(doc.dueDate);\n  const saldo = saldoDe(doc);\n  filas.push({\n    clave: periodo.mes + '-' + tipo + '-' + doc.id,\n    mes: periodo.mes,\n    tipo,\n    documento: numeroDe(doc),\n    contacto,\n    fecha: doc.date ? String(doc.date).slice(0, 10) : '',\n    vence: doc.dueDate ? String(doc.dueDate).slice(0, 10) : '',\n    dias: vence && hoy ? Math.round((hoy - vence) / 86400000) : 0,\n    monto: Math.round(saldo || Number(doc.total ?? 0)),\n    montoTexto: plata(saldo || Number(doc.total ?? 0)),\n    queHacer,\n    revisado: 'No',\n  });\n};\n\n// 1. Facturas de venta del mes que cerró y que nadie ha pagado.\nfor (const f of ventasAbiertas) {\n  if (!delMes(f)) continue;\n  if (!(saldoDe(f) > 0)) continue;\n  agregar('Venta sin cobrar', f, nombreDe(f.client), 'Cóbrala o provisiónala antes de cerrar');\n}\n\n// 2. Lo que quedó colgado de meses anteriores.\nif (INCLUIR_MESES_ANTERIORES) {\n  for (const f of ventasAbiertas) {\n    if (!anterior(f)) continue;\n    if (!(saldoDe(f) > 0)) continue;\n    agregar('Venta vieja sin cobrar', f, nombreDe(f.client), 'Ya lleva más de un mes: decide si la cobras o la castigas');\n  }\n}\n\n// 3. Facturas de venta que quedaron en borrador. Sin emitir, no existen.\nfor (const f of borradores) {\n  if (!delMes(f)) continue;\n  agregar('Borrador sin emitir', f, nombreDe(f.client), 'Emítela o bórrala: en borrador no cuenta para el mes');\n}\n\n// 4. Facturas de proveedor del mes que todavía debes.\nfor (const f of comprasAbiertas) {\n  if (!delMes(f)) continue;\n  if (!(saldoDe(f) > 0)) continue;\n  agregar('Compra sin pagar', f, nombreDe(f.provider || f.client), 'Págala o déjala causada con su fecha real');\n}\n\n// 5. Clientes que facturaste en el mes sin identificación registrada.\nconst sinIdentificacion = new Map();\nfor (const f of [...ventasAbiertas, ...borradores]) {\n  if (!delMes(f)) continue;\n  const c = f.client || {};\n  const id = c.identification || (c.identificationObject && c.identificationObject.number);\n  if (id) continue;\n  if (!c.id) continue;\n  if (sinIdentificacion.has(String(c.id))) continue;\n  sinIdentificacion.set(String(c.id), true);\n  filas.push({\n    clave: periodo.mes + '-Cliente sin identificación-' + c.id,\n    mes: periodo.mes,\n    tipo: 'Cliente sin identificación',\n    documento: numeroDe(f),\n    contacto: nombreDe(c),\n    fecha: f.date ? String(f.date).slice(0, 10) : '',\n    vence: '',\n    dias: 0,\n    monto: 0,\n    montoTexto: plata(0),\n    queHacer: 'Complétale la identificación en Alegra antes de reportar',\n    revisado: 'No',\n  });\n}\n\n// Si no hay nada pendiente igual mandamos una fila, para que el correo del\n// día 1 siempre llegue y sepas que el flujo corrió.\nif (!filas.length) {\n  filas.push({\n    clave: periodo.mes + '-Todo al día',\n    mes: periodo.mes,\n    tipo: 'Todo al día',\n    documento: '',\n    contacto: '',\n    fecha: periodo.hasta,\n    vence: '',\n    dias: 0,\n    monto: 0,\n    montoTexto: plata(0),\n    queHacer: 'No quedó nada pendiente de ' + periodo.mesTexto,\n    revisado: 'Sí',\n  });\n}\n\n// Lo de más plata primero, dentro de cada tipo.\nconst orden = [\n  'Borrador sin emitir',\n  'Cliente sin identificación',\n  'Venta sin cobrar',\n  'Compra sin pagar',\n  'Venta vieja sin cobrar',\n  'Todo al día',\n];\nfilas.sort(\n  (a, b) => orden.indexOf(a.tipo) - orden.indexOf(b.tipo) || b.monto - a.monto\n);\n\nreturn filas.map((fila) => ({ json: { ...fila, mesTexto: periodo.mesTexto } }));\n"
+      },
+      "id": "armar-checklist",
+      "name": "Armar el checklist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Cierre de mes"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Clave"
+          ],
+          "value": {
+            "Clave": "={{ $json.clave }}",
+            "Mes": "={{ $json.mes }}",
+            "Tipo": "={{ $json.tipo }}",
+            "Documento": "={{ $json.documento }}",
+            "Contacto": "={{ $json.contacto }}",
+            "Fecha": "={{ $json.fecha }}",
+            "Vence": "={{ $json.vence }}",
+            "Dias": "={{ $json.dias }}",
+            "Monto": "={{ $json.monto }}",
+            "Que hacer": "={{ $json.queHacer }}",
+            "Revisado": "={{ $json.revisado }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "guardar-checklist",
+      "name": "Guardar el checklist",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1700,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst MONEDA = 'COP';\nconst MAXIMO_POR_BLOQUE = 10; // cuántas filas mostrar de cada tipo en el correo\n// ──────────────────────────────────────────────────────────────────────\n\nconst filas = items.map((i) => i.json);\nconst mesTexto = (filas[0] && filas[0].mesTexto) || 'el mes pasado';\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst escapar = (t) =>\n  String(t ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;');\n\nconst todoAlDia = filas.length === 1 && filas[0].tipo === 'Todo al día';\n\n// Agrupamos por tipo, respetando el orden en que vienen.\nconst tipos = [];\nconst porTipo = new Map();\nfor (const f of filas) {\n  if (!porTipo.has(f.tipo)) {\n    porTipo.set(f.tipo, []);\n    tipos.push(f.tipo);\n  }\n  porTipo.get(f.tipo).push(f);\n}\n\nconst bloque = (tipo) => {\n  const lista = porTipo.get(tipo);\n  const total = lista.reduce((s, f) => s + f.monto, 0);\n  const cuerpo = lista\n    .slice(0, MAXIMO_POR_BLOQUE)\n    .map(\n      (f) =>\n        '<tr>' +\n        '<td style=\"padding:8px 12px;border-bottom:1px solid #eee;\">' + escapar(f.documento) + '</td>' +\n        '<td style=\"padding:8px 12px;border-bottom:1px solid #eee;\">' + escapar(f.contacto) + '</td>' +\n        '<td style=\"padding:8px 12px;border-bottom:1px solid #eee;\">' + escapar(f.fecha) + '</td>' +\n        '<td style=\"padding:8px 12px;border-bottom:1px solid #eee;text-align:right;\">' + escapar(f.montoTexto) + '</td>' +\n        '</tr>'\n    )\n    .join('');\n\n  return (\n    '<h3 style=\"color:#30bbb7;margin:24px 0 4px;\">' + escapar(tipo) +\n    ' <span style=\"font-weight:normal;color:#666;\">(' + lista.length +\n    (total > 0 ? ' · ' + plata(total) : '') + ')</span></h3>' +\n    '<p style=\"margin:0 0 8px;color:#666;font-size:13px;\">' + escapar(lista[0].queHacer) + '</p>' +\n    '<table style=\"border-collapse:collapse;width:100%;font-size:14px;\">' +\n    '<tr style=\"text-align:left;background:#f6f6f6;\">' +\n    '<th style=\"padding:8px 12px;\">Documento</th>' +\n    '<th style=\"padding:8px 12px;\">Contacto</th>' +\n    '<th style=\"padding:8px 12px;\">Fecha</th>' +\n    '<th style=\"padding:8px 12px;text-align:right;\">Monto</th>' +\n    '</tr>' + cuerpo + '</table>' +\n    (lista.length > MAXIMO_POR_BLOQUE\n      ? '<p style=\"margin:6px 0 0;color:#888;font-size:12px;\">… y ' +\n        (lista.length - MAXIMO_POR_BLOQUE) + ' más en la hoja.</p>'\n      : '')\n  );\n};\n\nconst asunto = todoAlDia\n  ? 'Cierre de ' + mesTexto + ': no quedó nada pendiente'\n  : 'Cierre de ' + mesTexto + ': ' + filas.length +\n    (filas.length === 1 ? ' pendiente' : ' pendientes');\n\nconst mensaje = todoAlDia\n  ? '<div style=\"font-family:Inter,Arial,sans-serif;color:#333;max-width:720px;\">' +\n    '<h2 style=\"color:#30bbb7;margin:0 0 8px;\">Cerraste ' + escapar(mesTexto) + ' limpio</h2>' +\n    '<p style=\"margin:0;\">No quedaron facturas sin cobrar, ni borradores sin emitir, ni compras sin pagar de ese mes.</p>' +\n    '<p style=\"margin-top:24px;color:#888;font-size:12px;\">Sale de tus documentos abiertos en Alegra.</p></div>'\n  : '<div style=\"font-family:Inter,Arial,sans-serif;color:#333;max-width:720px;\">' +\n    '<h2 style=\"color:#30bbb7;margin:0 0 4px;\">Lo que falta para cerrar ' + escapar(mesTexto) + '</h2>' +\n    '<p style=\"margin:0 0 8px;color:#666;\">' + filas.length +\n    (filas.length === 1 ? ' pendiente' : ' pendientes') + ' en ' + tipos.length +\n    (tipos.length === 1 ? ' frente' : ' frentes') + '. El detalle completo quedó en tu hoja de Google.</p>' +\n    tipos.map(bloque).join('') +\n    '<p style=\"margin-top:24px;color:#888;font-size:12px;\">' +\n    'Sale de tus documentos abiertos y en borrador en Alegra. Este flujo no cambia nada: solo te dice qué mirar.' +\n    '</p></div>';\n\nreturn [{ json: { asunto, mensaje, pendientes: todoAlDia ? 0 : filas.length, mesTexto } }];\n"
+      },
+      "id": "armar-correo",
+      "name": "Armar el correo del cierre",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "REEMPLAZAR_CORREO_DESTINO",
+        "subject": "={{ $json.asunto }}",
+        "message": "={{ $json.mensaje }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "mandar-checklist",
+      "name": "Mandar el checklist",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        540
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "El día 1 de cada mes": {
+      "main": [
+        [
+          {
+            "node": "Calcular el mes que cerró",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular el mes que cerró": {
+      "main": [
+        [
+          {
+            "node": "Traer las ventas sin cobrar",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Traer las ventas en borrador",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Traer las compras sin pagar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer las ventas sin cobrar": {
+      "main": [
+        [
+          {
+            "node": "Separar las ventas sin cobrar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer las ventas en borrador": {
+      "main": [
+        [
+          {
+            "node": "Separar los borradores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer las compras sin pagar": {
+      "main": [
+        [
+          {
+            "node": "Separar las compras sin pagar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar las ventas sin cobrar": {
+      "main": [
+        [
+          {
+            "node": "Juntar todo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar los borradores": {
+      "main": [
+        [
+          {
+            "node": "Juntar todo",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Separar las compras sin pagar": {
+      "main": [
+        [
+          {
+            "node": "Juntar todo",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Juntar todo": {
+      "main": [
+        [
+          {
+            "node": "Armar el checklist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar el checklist": {
+      "main": [
+        [
+          {
+            "node": "Guardar el checklist",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Armar el correo del cierre",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar el correo del cierre": {
+      "main": [
+        [
+          {
+            "node": "Mandar el checklist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

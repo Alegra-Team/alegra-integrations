@@ -65,6 +65,22 @@ jobs:
           fi
           echo "Todas las skills usan solo tools de consulta."
 
+  automatizaciones:
+    name: Verificar los flujos de n8n
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Buscar secretos en los workflow.json
+        run: node scripts/sanitize-workflow.js --check automatizaciones/n8n/*/workflow.json
+
+      - name: Verificar la estructura de los flujos
+        run: node scripts/revisar-flujos.js
+
   estructura:
     name: Verificar estructura de las skills
     runs-on: ubuntu-latest

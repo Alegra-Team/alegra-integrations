@@ -1,0 +1,300 @@
+{
+  "name": "Alegra — Calendario de pagos a proveedores",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Calendario de pagos a proveedores\n\nCada lunes a las 7:00 revisa tus facturas de proveedor abiertas en Alegra, arma la lista de lo que vence en los próximos 15 días, la deja en una hoja de Google y te manda el resumen por correo.\n\n**No escribe nada en Alegra.** Solo lee.\n\n**Antes de activarlo necesitas:**\n\n1. La credencial de Alegra en n8n, llamada exactamente `Alegra API`.\n2. La credencial de Google Sheets, llamada `Google Sheets account`.\n3. La credencial de Gmail, llamada `Gmail account`.\n4. Reemplazar `REEMPLAZAR_SPREADSHEET_ID` en el nodo \"Guardar el calendario\".\n5. Reemplazar `REEMPLAZAR_CORREO_DESTINO` en el nodo \"Mandar el resumen\".\n\nEl paso a paso completo está en el README de esta carpeta.",
+        "height": 460,
+        "width": 440,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -540,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Cómo debe verse tu hoja\n\nCrea una hoja de cálculo en Google con una pestaña llamada **Pagos por vencer** y esta primera fila, escrita igual:\n\n`Id en Alegra` · `Proveedor` · `Numero` · `Vence` · `Dias` · `Estado` · `Semana` · `Total` · `Pagado` · `Falta` · `Moneda` · `Actualizado`\n\nLa columna **Id en Alegra** es la que usa el flujo para no repetir filas: si la factura ya está, la actualiza en vez de agregarla otra vez.\n\nEl `REEMPLAZAR_SPREADSHEET_ID` es el pedazo de la URL entre `/d/` y `/edit`.",
+        "height": 360,
+        "width": 440,
+        "color": 5
+      },
+      "id": "nota-hoja",
+      "name": "Cómo debe verse tu hoja",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "disparador-lunes",
+      "name": "Cada lunes a las 7:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alegra.com/api/v1/bills",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "open"
+            },
+            {
+              "name": "order_field",
+              "value": "dueDate"
+            },
+            {
+              "name": "order_direction",
+              "value": "ASC"
+            },
+            {
+              "name": "limit",
+              "value": "30"
+            },
+            {
+              "name": "metadata",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "start",
+                    "value": "={{ $pageCount * 30 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.length < 30 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 40,
+              "requestInterval": 300
+            }
+          }
+        }
+      },
+      "id": "traer-facturas-proveedor",
+      "name": "Traer las facturas de proveedor abiertas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        280,
+        320
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra devuelve máximo 30 facturas de proveedor por llamada, así que el nodo\n// anterior hace varias llamadas y entrega una página por cada una.\n// Aquí las abrimos para quedar con una factura por item.\n\nconst facturas = [];\n\nfor (const item of items) {\n  const cuerpo = item.json;\n  if (Array.isArray(cuerpo)) {\n    facturas.push(...cuerpo);\n  } else if (Array.isArray(cuerpo.data)) {\n    facturas.push(...cuerpo.data);\n  } else {\n    facturas.push(cuerpo);\n  }\n}\n\nreturn facturas.map((factura) => ({ json: factura }));\n"
+      },
+      "id": "separar-facturas",
+      "name": "Separar las facturas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst DIAS_HACIA_ADELANTE = 15;  // hasta cuántos días adelante mirar\nconst MONEDA = 'COP';            // solo afecta cómo se ve la plata\nconst INCLUIR_VENCIDAS = true;   // false si solo quieres lo que está por vencer\n// ──────────────────────────────────────────────────────────────────────\n\n// La fecha de hoy, a la medianoche, en la zona horaria de tu n8n.\nconst hoy = new Date();\nhoy.setHours(0, 0, 0, 0);\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\n// Una fecha sin hora la lee JavaScript como UTC y en Colombia queda corrida\n// un día. Por eso le pegamos la medianoche local.\nconst fecha = (d) => {\n  if (!d) return null;\n  const f = new Date(String(d).slice(0, 10) + 'T00:00:00');\n  return isNaN(f.getTime()) ? null : f;\n};\n\nconst aTexto = (f) => {\n  const p = (n) => String(n).padStart(2, '0');\n  return f.getFullYear() + '-' + p(f.getMonth() + 1) + '-' + p(f.getDate());\n};\n\n// El nombre del proveedor llega distinto según el país. Lo normalizamos.\nconst nombreDe = (p) => {\n  const n = p && p.name;\n  if (Array.isArray(n)) return n.filter(Boolean).join(' ');\n  if (n && typeof n === 'object') return [n.firstName, n.lastName].filter(Boolean).join(' ');\n  return n || 'Proveedor sin nombre';\n};\n\nconst numeroDe = (f) =>\n  String(\n    (f.numberTemplate && f.numberTemplate.fullNumber) ||\n      f.billNumber ||\n      f.number ||\n      f.id\n  );\n\nconst filas = [];\n\nfor (const item of items) {\n  const f = item.json;\n\n  // Lo que falta por pagar viene en 'balance'. Si esa cuenta no lo trae,\n  // lo deducimos del total menos lo ya pagado.\n  const falta = Number(f.balance ?? Number(f.total ?? 0) - Number(f.totalPaid ?? 0));\n  if (!(falta > 0)) continue;\n\n  const vence = fecha(f.dueDate) || fecha(f.date);\n  if (!vence) continue;\n\n  // Positivo: le quedan días. Negativo: ya se venció.\n  const dias = Math.round((vence - hoy) / 86400000);\n\n  if (dias > DIAS_HACIA_ADELANTE) continue;\n  if (dias < 0 && !INCLUIR_VENCIDAS) continue;\n\n  let estado;\n  if (dias < 0) estado = 'Vencida';\n  else if (dias === 0) estado = 'Vence hoy';\n  else if (dias <= 3) estado = 'Esta semana';\n  else estado = 'Por vencer';\n\n  // Semana calendario a la que cae el vencimiento, contada desde hoy.\n  const semana = dias < 0 ? 'Vencidas' : dias <= 6 ? 'Esta semana' : 'Próxima semana';\n\n  filas.push({\n    idAlegra: String(f.id),\n    numero: numeroDe(f),\n    proveedor: nombreDe(f.provider || f.client),\n    vence: aTexto(vence),\n    dias,\n    diasTexto: dias < 0 ? Math.abs(dias) + ' días vencida' : dias === 0 ? 'hoy' : 'en ' + dias + ' días',\n    estado,\n    semana,\n    total: Math.round(Number(f.total ?? 0)),\n    pagado: Math.round(Number(f.totalPaid ?? 0)),\n    falta: Math.round(falta),\n    faltaTexto: plata(falta),\n    moneda: (f.currency && f.currency.code) || MONEDA,\n    actualizado: aTexto(hoy),\n  });\n}\n\n// Primero lo más urgente.\nfilas.sort((a, b) => a.dias - b.dias || b.falta - a.falta);\n\nreturn filas.map((fila) => ({ json: fila }));\n"
+      },
+      "id": "armar-calendario",
+      "name": "Armar el calendario de pagos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Pagos por vencer"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Id en Alegra"
+          ],
+          "value": {
+            "Id en Alegra": "={{ $json.idAlegra }}",
+            "Proveedor": "={{ $json.proveedor }}",
+            "Numero": "={{ $json.numero }}",
+            "Vence": "={{ $json.vence }}",
+            "Dias": "={{ $json.dias }}",
+            "Estado": "={{ $json.estado }}",
+            "Semana": "={{ $json.semana }}",
+            "Total": "={{ $json.total }}",
+            "Pagado": "={{ $json.pagado }}",
+            "Falta": "={{ $json.falta }}",
+            "Moneda": "={{ $json.moneda }}",
+            "Actualizado": "={{ $json.actualizado }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "guardar-calendario",
+      "name": "Guardar el calendario",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1160,
+        200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst MONEDA = 'COP';\n// ──────────────────────────────────────────────────────────────────────\n\nconst filas = items.map((i) => i.json);\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst escapar = (t) =>\n  String(t ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;');\n\nconst total = filas.reduce((s, f) => s + f.falta, 0);\nconst vencidas = filas.filter((f) => f.dias < 0);\nconst estaSemana = filas.filter((f) => f.dias >= 0 && f.dias <= 6);\nconst proxima = filas.filter((f) => f.dias > 6);\n\nconst sumar = (lista) => lista.reduce((s, f) => s + f.falta, 0);\n\nconst bloque = (titulo, lista, color) => {\n  if (!lista.length) return '';\n  const cuerpo = lista\n    .map(\n      (f) =>\n        '<tr>' +\n        '<td style=\"padding:8px 12px;border-bottom:1px solid #eee;\">' + escapar(f.proveedor) + '</td>' +\n        '<td style=\"padding:8px 12px;border-bottom:1px solid #eee;\">' + escapar(f.numero) + '</td>' +\n        '<td style=\"padding:8px 12px;border-bottom:1px solid #eee;\">' + escapar(f.vence) + '</td>' +\n        '<td style=\"padding:8px 12px;border-bottom:1px solid #eee;\">' + escapar(f.diasTexto) + '</td>' +\n        '<td style=\"padding:8px 12px;border-bottom:1px solid #eee;text-align:right;\"><strong>' + escapar(f.faltaTexto) + '</strong></td>' +\n        '</tr>'\n    )\n    .join('');\n\n  return (\n    '<h3 style=\"color:' + color + ';margin:24px 0 8px;\">' + titulo +\n    ' — ' + plata(sumar(lista)) + ' <span style=\"font-weight:normal;color:#666;\">(' + lista.length + ')</span></h3>' +\n    '<table style=\"border-collapse:collapse;width:100%;font-size:14px;\">' +\n    '<tr style=\"text-align:left;background:#f6f6f6;\">' +\n    '<th style=\"padding:8px 12px;\">Proveedor</th>' +\n    '<th style=\"padding:8px 12px;\">Factura</th>' +\n    '<th style=\"padding:8px 12px;\">Vence</th>' +\n    '<th style=\"padding:8px 12px;\">Cuándo</th>' +\n    '<th style=\"padding:8px 12px;text-align:right;\">Falta pagar</th>' +\n    '</tr>' + cuerpo + '</table>'\n  );\n};\n\nconst asunto =\n  'Pagos de la quincena: ' + plata(total) + ' en ' + filas.length +\n  (filas.length === 1 ? ' factura' : ' facturas');\n\nconst mensaje =\n  '<div style=\"font-family:Inter,Arial,sans-serif;color:#333;max-width:720px;\">' +\n  '<h2 style=\"color:#30bbb7;margin:0 0 4px;\">Esto es lo que tienes que pagar</h2>' +\n  '<p style=\"margin:0 0 16px;color:#666;\">' +\n  'En total <strong>' + plata(total) + '</strong> repartidos en ' + filas.length +\n  (filas.length === 1 ? ' factura' : ' facturas') + '.</p>' +\n  bloque('Ya vencidas', vencidas, '#c0392b') +\n  bloque('Esta semana', estaSemana, '#d68910') +\n  bloque('Próxima semana', proxima, '#30bbb7') +\n  '<p style=\"margin-top:24px;color:#888;font-size:12px;\">' +\n  'Sale de tus facturas de proveedor abiertas en Alegra. El detalle completo quedó en tu hoja de Google.' +\n  '</p></div>';\n\nreturn [{ json: { asunto, mensaje, total, cantidad: filas.length } }];\n"
+      },
+      "id": "armar-correo",
+      "name": "Armar el correo del lunes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "REEMPLAZAR_CORREO_DESTINO",
+        "subject": "={{ $json.asunto }}",
+        "message": "={{ $json.mensaje }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "mandar-resumen",
+      "name": "Mandar el resumen",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        440
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada lunes a las 7:00": {
+      "main": [
+        [
+          {
+            "node": "Traer las facturas de proveedor abiertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer las facturas de proveedor abiertas": {
+      "main": [
+        [
+          {
+            "node": "Separar las facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar las facturas": {
+      "main": [
+        [
+          {
+            "node": "Armar el calendario de pagos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar el calendario de pagos": {
+      "main": [
+        [
+          {
+            "node": "Guardar el calendario",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Armar el correo del lunes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar el correo del lunes": {
+      "main": [
+        [
+          {
+            "node": "Mandar el resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

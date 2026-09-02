@@ -1,0 +1,392 @@
+{
+  "name": "Alegra — Bienvenida a cliente nuevo",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Bienvenida a cliente nuevo\n\nCada vez que creas un cliente en Alegra, este flujo:\n\n1. Le pregunta a Alegra la ficha completa del cliente.\n2. Revisa qué datos le faltan.\n3. Te deja la ficha en Notion.\n4. Te deja el correo de bienvenida en borradores.\n5. Si el cliente no tiene cupo de crédito, se lo pone.\n\n**Antes de importar hay dos cosas por hacer:**\n\n- Reemplazar `REEMPLAZAR_DATABASE_ID` en el nodo **Guardar la ficha en Notion**.\n- Registrar la URL de este webhook en Alegra. Está explicado en\n  `CONECTAR-WEBHOOKS-ALEGRA.md`, y se hace sin abrir una terminal.\n\nEl paso a paso completo está en el README de esta misma carpeta.",
+        "height": 420,
+        "width": 420,
+        "color": 4
+      },
+      "id": "sticky-lee",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Cómo debe verse tu base de Notion\n\nCrea una base de datos con estas columnas, escritas **igual**:\n\n| Columna | Tipo en Notion |\n|---|---|\n| Name | Title |\n| Identificación | Text |\n| Correo | Text |\n| Teléfono | Text |\n| Ciudad | Text |\n| Estado de la ficha | Select |\n| Le falta | Text |\n| Cupo de crédito | Number |\n| Creado en Alegra | Date |\n\nEn **Estado de la ficha** deja tres opciones:\n`Completo`, `Le falta poco`, `Incompleto`.\n\nY no olvides **compartir la base con tu integración de Notion**.\nSin eso el nodo falla con un 404 que no explica nada.",
+        "height": 460,
+        "width": 400,
+        "color": 5
+      },
+      "id": "sticky-notion",
+      "name": "Cómo debe verse tu base de Notion",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Empieza en seco\n\nEl nodo **Ponerle el cupo de crédito** viene\n**desactivado a propósito**. Es el único que\nescribe en Alegra.\n\nCon él desactivado, la ficha de Notion te dice\nqué cupo *habría* puesto, y en Alegra no se\ntoca nada.\n\nCuando el número te cuadre:\nclic derecho → **Activate**.",
+        "height": 300,
+        "width": 340,
+        "color": 3
+      },
+      "id": "sticky-seco",
+      "name": "Empieza en seco",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alegra-cliente-nuevo",
+        "responseMode": "onReceived",
+        "options": {
+          "responseData": "recibido"
+        }
+      },
+      "id": "webhook-cliente",
+      "name": "Cuando creas un cliente",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alegra no documenta la forma exacta de lo que manda el webhook, así que aquí\n// no confiamos en ella: buscamos el id del cliente donde pueda estar y con eso\n// le volvemos a preguntar a Alegra la ficha completa.\n\nconst crudo = (items[0] && items[0].json) || {};\nconst cuerpo = crudo.body !== undefined ? crudo.body : crudo;\nconst base = Array.isArray(cuerpo) ? cuerpo[0] || {} : cuerpo;\n\nconst posibles = [\n  base.id,\n  base.contactId,\n  base.clientId,\n  base.idContact,\n  base.data && base.data.id,\n  base.contact && base.contact.id,\n  base.client && base.client.id,\n  base.resource && base.resource.id,\n  base.payload && base.payload.id,\n];\n\nconst clienteId = posibles\n  .map((v) => (v === undefined || v === null ? '' : String(v).trim()))\n  .find((v) => v !== '');\n\nif (!clienteId) {\n  throw new Error(\n    'No encontré el id del cliente en lo que mandó Alegra. Esto fue lo que llegó: ' +\n      JSON.stringify(cuerpo).slice(0, 500)\n  );\n}\n\nreturn [{ json: { clienteId } }];"
+      },
+      "id": "code-id",
+      "name": "Sacar el id del cliente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.alegra.com/api/v1/contacts/{{ $json.clienteId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "http-contacto",
+      "name": "Traer el cliente completo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        100
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Puedes cambiar esto ──────────────────────────────────────────────\nconst CUPO_POR_DEFECTO = 2000000;   // el cupo de crédito que le pones a los nuevos\nconst MONEDA = 'COP';\nconst TU_EMPRESA = 'nuestra empresa';   // cómo quieres que te nombre el correo\n// ──────────────────────────────────────────────────────────────────────\n\nconst plata = (n) =>\n  new Intl.NumberFormat('es-CO', {\n    style: 'currency',\n    currency: MONEDA,\n    maximumFractionDigits: 0,\n  }).format(n);\n\nconst c = (items[0] && items[0].json) || {};\n\nconst texto = (v) => (v === undefined || v === null ? '' : String(v).trim());\n\nconst nombre = texto(c.name) || 'Cliente sin nombre';\nconst identificacion =\n  texto(c.identificationObject && c.identificationObject.number) ||\n  texto(c.identification);\nconst correo = texto(c.email);\nconst telefono = texto(c.phonePrimary) || texto(c.mobile);\n\nconst dir = c.address || {};\nconst ciudad = texto(dir.city);\nconst direccion = texto(dir.address);\n\nconst cupoActual = Number(c.creditLimit ?? 0);\nconst necesitaCupo = !(cupoActual > 0);\n\n// ── Qué le falta a la ficha ──\nconst faltantes = [];\nif (!identificacion) faltantes.push('Identificación');\nif (!correo) faltantes.push('Correo');\nif (!telefono) faltantes.push('Teléfono');\nif (!direccion) faltantes.push('Dirección');\nif (necesitaCupo) faltantes.push('Cupo de crédito');\n\nconst estadoFicha =\n  faltantes.length === 0\n    ? 'Completo'\n    : faltantes.length <= 2\n      ? 'Le falta poco'\n      : 'Incompleto';\n\n// ── La fecha en que quedó creado ──\nconst creado = texto(c.created_at) || texto(c.createdAt);\nconst fechaCreacion = creado\n  ? creado.slice(0, 10)\n  : (() => {\n      const h = new Date();\n      return (\n        h.getFullYear() +\n        '-' + String(h.getMonth() + 1).padStart(2, '0') +\n        '-' + String(h.getDate()).padStart(2, '0')\n      );\n    })();\n\n// ── El correo de bienvenida ──\n// A una persona la saludamos por el nombre de pila. A una empresa, por su nombre\n// completo: 'Hola, Ferretería' sonaría raro.\nconst esPersona = texto(c.kindOfPerson) === 'PERSON_ENTITY';\nconst nombreDePila = texto(c.nameObject && c.nameObject.firstName);\nconst saludo = esPersona && nombreDePila ? nombreDePila : nombre;\n\nconst mensaje = [\n  '<p>Hola, ' + saludo + '.</p>',\n  '<p>Ya quedaste registrado como cliente de ' + TU_EMPRESA + '. ' +\n    'Desde ahora te vamos a facturar a nombre de <b>' + nombre + '</b>' +\n    (identificacion ? ' con la identificación <b>' + identificacion + '</b>' : '') +\n    '.</p>',\n  correo\n    ? '<p>Las facturas te van a llegar a <b>' + correo + '</b>. ' +\n      'Si prefieres otro correo, respóndenos y lo cambiamos.</p>'\n    : '',\n  '<p>Cualquier cosa que necesites, este correo es el canal.</p>',\n  '<p>Gracias por la confianza.</p>',\n].filter(Boolean).join('\\n');\n\nreturn [\n  {\n    json: {\n      clienteId: String(c.id ?? ''),\n      nombre,\n      identificacion: identificacion || 'Sin identificación',\n      correo,\n      tieneCorreo: correo !== '',\n      telefono: telefono || 'Sin teléfono',\n      ciudad: ciudad || 'Sin ciudad',\n      estadoFicha,\n      faltantesTexto: faltantes.length ? faltantes.join(', ') : 'Nada, está completo',\n      fechaCreacion,\n      cupoActual,\n      necesitaCupo,\n      cupoSugerido: CUPO_POR_DEFECTO,\n      cupoParaNotion: necesitaCupo ? CUPO_POR_DEFECTO : cupoActual,\n      cupoTexto: plata(necesitaCupo ? CUPO_POR_DEFECTO : cupoActual),\n      asunto: 'Bienvenido, ' + saludo,\n      mensaje,\n    },\n  },\n];"
+      },
+      "id": "code-revisar",
+      "name": "Revisar el cliente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_DATABASE_ID"
+        },
+        "title": "={{ $json.nombre }}",
+        "simple": true,
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Identificación|rich_text",
+              "richText": false,
+              "textContent": "={{ $json.identificacion }}"
+            },
+            {
+              "key": "Correo|rich_text",
+              "richText": false,
+              "textContent": "={{ $json.correo }}"
+            },
+            {
+              "key": "Teléfono|rich_text",
+              "richText": false,
+              "textContent": "={{ $json.telefono }}"
+            },
+            {
+              "key": "Ciudad|rich_text",
+              "richText": false,
+              "textContent": "={{ $json.ciudad }}"
+            },
+            {
+              "key": "Estado de la ficha|select",
+              "selectValue": "={{ $json.estadoFicha }}"
+            },
+            {
+              "key": "Le falta|rich_text",
+              "richText": false,
+              "textContent": "={{ $json.faltantesTexto }}"
+            },
+            {
+              "key": "Cupo de crédito|number",
+              "numberValue": "={{ $json.cupoParaNotion }}"
+            },
+            {
+              "key": "Creado en Alegra|date",
+              "includeTime": false,
+              "date": "={{ $json.fechaCreacion }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "notion-ficha",
+      "name": "Guardar la ficha en Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        -80
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "tiene-correo",
+              "leftValue": "={{ $json.tieneCorreo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-correo",
+      "name": "¿Tiene correo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{ $json.asunto }}",
+        "emailType": "html",
+        "message": "={{ $json.mensaje }}",
+        "options": {
+          "sendTo": "={{ $json.correo }}"
+        }
+      },
+      "id": "gmail-bienvenida",
+      "name": "Dejar la bienvenida en borradores",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1180,
+        100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "necesita-cupo",
+              "leftValue": "={{ $json.necesitaCupo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-cupo",
+      "name": "¿Le falta cupo de crédito?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.alegra.com/api/v1/contacts/{{ $json.clienteId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ creditLimit: $json.cupoSugerido }) }}",
+        "options": {}
+      },
+      "id": "http-cupo",
+      "name": "Ponerle el cupo de crédito",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1180,
+        300
+      ],
+      "disabled": true,
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cuando creas un cliente": {
+      "main": [
+        [
+          {
+            "node": "Sacar el id del cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sacar el id del cliente": {
+      "main": [
+        [
+          {
+            "node": "Traer el cliente completo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer el cliente completo": {
+      "main": [
+        [
+          {
+            "node": "Revisar el cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revisar el cliente": {
+      "main": [
+        [
+          {
+            "node": "Guardar la ficha en Notion",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Tiene correo?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Le falta cupo de crédito?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Tiene correo?": {
+      "main": [
+        [
+          {
+            "node": "Dejar la bienvenida en borradores",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "¿Le falta cupo de crédito?": {
+      "main": [
+        [
+          {
+            "node": "Ponerle el cupo de crédito",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  }
+}

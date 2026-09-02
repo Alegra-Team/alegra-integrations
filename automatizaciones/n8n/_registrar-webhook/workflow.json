@@ -1,0 +1,211 @@
+{
+  "name": "Alegra — Registrar un webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Registrar un webhook de Alegra\n\nTres de las automatizaciones se disparan cuando pasa algo en Alegra (una factura nueva, un cliente nuevo). Para que eso funcione hay que decirle a Alegra a qué dirección avisar, y eso hoy solo se hace por API.\n\nEste flujo lo hace por ti. **No lo actives.** Se usa a mano:\n\n1. Conecta la credencial `Alegra API` en el nodo **Registrar en Alegra**.\n2. Dale a **Execute Workflow**. n8n te abre un formulario.\n3. Pega la **Production URL** del flujo que quieres conectar y elige el evento.\n4. Envía. El formulario te dice si quedó o qué falló.\n\nLa URL de producción la sacas del nodo del webhook del otro flujo, pestaña **Production URL**, y **ese flujo tiene que estar activo**.\n\nEl paso a paso completo está en `CONECTAR-WEBHOOKS-ALEGRA.md`.",
+        "height": 480,
+        "width": 460,
+        "color": 4
+      },
+      "id": "nota-intro",
+      "name": "Léeme primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -540,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Qué evento usa cada flujo\n\n| Flujo | Evento |\n|---|---|\n| Bienvenida a un cliente nuevo | `new-client` |\n| Guardián de facturas duplicadas | `new-bill` |\n| Guardián de anomalías en facturas | `new-invoice` **y** `edit-invoice` |\n\nEl guardián de anomalías necesita **dos** registros, uno por evento, con la misma URL. Corre este flujo dos veces.\n\nAlegra rechaza registrar dos veces el mismo evento con la misma URL. Si te dice que no lo aceptó, es probable que ya lo tuvieras listo.",
+        "height": 400,
+        "width": 420,
+        "color": 5
+      },
+      "id": "nota-eventos",
+      "name": "Qué evento usa cada flujo",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        700,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Conectar un flujo con Alegra",
+        "formDescription": "Pega la dirección de producción del flujo que quieres disparar y elige qué tiene que pasar en Alegra para que se dispare.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Dirección del flujo (Production URL)",
+              "fieldName": "url",
+              "fieldType": "text",
+              "placeholder": "https://tu-cuenta.app.n8n.cloud/webhook/alegra-factura-proveedor-nueva",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Qué tiene que pasar en Alegra",
+              "fieldName": "evento",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "new-invoice"
+                  },
+                  {
+                    "option": "edit-invoice"
+                  },
+                  {
+                    "option": "delete-invoice"
+                  },
+                  {
+                    "option": "new-bill"
+                  },
+                  {
+                    "option": "edit-bill"
+                  },
+                  {
+                    "option": "delete-bill"
+                  },
+                  {
+                    "option": "new-client"
+                  },
+                  {
+                    "option": "edit-client"
+                  },
+                  {
+                    "option": "delete-client"
+                  },
+                  {
+                    "option": "new-item"
+                  },
+                  {
+                    "option": "edit-item"
+                  },
+                  {
+                    "option": "delete-item"
+                  }
+                ]
+              },
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Registrar en Alegra"
+        }
+      },
+      "id": "formulario",
+      "name": "Pega la dirección y elige el evento",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const datos = items[0].json;\n\nconst url = String(datos.url || '').trim();\nconst evento = String(datos.evento || '').trim();\n\nif (!url) {\n  throw new Error('Te faltó pegar la URL del flujo.');\n}\n\nif (!url.startsWith('https://')) {\n  throw new Error(\n    'La URL tiene que empezar con https:// — Alegra no acepta http. ' +\n      'Pegaste: ' + url\n  );\n}\n\nif (url.includes('/webhook-test/')) {\n  throw new Error(\n    'Esa es la URL de prueba (dice /webhook-test/). Solo funciona mientras tienes ' +\n      'el flujo abierto y le diste a \"Listen for test event\". Para registrarla en ' +\n      'Alegra necesitas la URL de producción, la que dice /webhook/. La ves en el ' +\n      'nodo del webhook, en la pestaña \"Production URL\", después de activar el flujo.'\n  );\n}\n\nif (!url.includes('/webhook/')) {\n  throw new Error(\n    'Esa URL no parece la de un webhook de n8n. La correcta tiene /webhook/ en la ' +\n      'mitad. Cópiala del nodo del webhook, pestaña \"Production URL\".'\n  );\n}\n\nif (!evento) {\n  throw new Error('Te faltó elegir el evento.');\n}\n\nreturn [{ json: { url, evento } }];\n"
+      },
+      "id": "revisar",
+      "name": "Revisar lo que pegaste",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.alegra.com/api/v1/webhooks/subscriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event: $json.evento, url: $json.url }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "registrar",
+      "name": "Registrar en Alegra",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        320
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "Alegra API"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const pedido = $('Revisar lo que pegaste').first().json;\nconst respuesta = items[0].json;\n\nconst codigo = Number(respuesta.statusCode ?? 0);\nconst cuerpo = respuesta.body ?? respuesta;\n\nconst comoTexto = (x) => {\n  if (x === null || x === undefined) return '';\n  if (typeof x === 'string') return x;\n  try {\n    return JSON.stringify(x);\n  } catch (e) {\n    return String(x);\n  }\n};\n\nconst detalle = comoTexto(\n  (cuerpo && (cuerpo.message || cuerpo.error)) || cuerpo\n);\n\nlet quedo = false;\nlet titulo = '';\nlet explicacion = '';\n\nif (codigo >= 200 && codigo < 300) {\n  quedo = true;\n  titulo = 'Listo, quedó registrado';\n  explicacion =\n    'Alegra ya sabe que cada vez que pase \"' + pedido.evento + '\" tiene que avisarle ' +\n    'a tu flujo. Para probarlo, haz esa acción en Alegra y mira las ejecuciones del ' +\n    'flujo en n8n.';\n} else if (codigo === 401 || codigo === 403) {\n  titulo = 'La credencial de Alegra no sirvió';\n  explicacion =\n    'Revisa la credencial \"Alegra API\": en User va el correo con el que entras a ' +\n    'Alegra y en Password va tu token de la API, no tu contraseña.';\n} else if (codigo === 400 || codigo === 409 || codigo === 422) {\n  titulo = 'Alegra no lo aceptó';\n  explicacion =\n    'Casi siempre es porque esa misma URL ya está registrada para ese mismo evento. ' +\n    'Alegra no acepta duplicados, así que si ves esto es probable que ya lo tuvieras ' +\n    'listo de antes. La otra causa común es que la URL no sea alcanzable desde ' +\n    'internet. Respuesta de Alegra: ' + detalle;\n} else {\n  titulo = 'Algo salió mal';\n  explicacion =\n    'Alegra respondió con el código ' + codigo + '. Respuesta: ' + detalle;\n}\n\nreturn [\n  {\n    json: {\n      quedo,\n      codigo,\n      evento: pedido.evento,\n      url: pedido.url,\n      resultado: titulo,\n      queSigue: explicacion,\n      respuestaDeAlegra: detalle,\n    },\n  },\n];\n"
+      },
+      "id": "explicar",
+      "name": "Contarte cómo fue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "Pega la dirección y elige el evento": {
+      "main": [
+        [
+          {
+            "node": "Revisar lo que pegaste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revisar lo que pegaste": {
+      "main": [
+        [
+          {
+            "node": "Registrar en Alegra",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar en Alegra": {
+      "main": [
+        [
+          {
+            "node": "Contarte cómo fue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

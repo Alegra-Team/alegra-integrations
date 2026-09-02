@@ -12,7 +12,7 @@
 <p align="center">
   <a href="#para-pymes"><img src="https://img.shields.io/badge/Pymes-7_skills-30bbb7?style=flat-square" alt="7 skills para pymes"></a>
   <a href="#para-contadores"><img src="https://img.shields.io/badge/Contadores-7_skills-4f46e5?style=flat-square" alt="7 skills para contadores"></a>
-  <a href="automatizaciones/"><img src="https://img.shields.io/badge/Automatizaciones_n8n-pr%C3%B3ximamente-64748b?style=flat-square" alt="Automatizaciones n8n próximamente"></a>
+  <a href="automatizaciones/"><img src="https://img.shields.io/badge/Automatizaciones_n8n-10_flujos-30bbb7?style=flat-square" alt="10 automatizaciones de n8n"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/Licencia-MIT-16a34a?style=flat-square" alt="Licencia MIT"></a>
 </p>
 
@@ -90,7 +90,20 @@ Para quien lleva la contabilidad de uno o varios negocios.
 
 ## Automatizaciones n8n
 
-Próximamente: flujos de n8n en `.json` listos para importar, cada uno con su explicación. Mira lo que viene en **[automatizaciones/README.md](automatizaciones/README.md)**.
+Una skill responde cuando le preguntas. Una automatización trabaja sola.
+
+**[10 flujos de n8n](automatizaciones/)** listos para descargar, importar y poner a correr con tus datos. Siete corren a una hora; tres reaccionan al momento en que pasa algo en Alegra.
+
+| Para tu negocio | Para tu contabilidad |
+|---|---|
+| [Radar de cartera en Notion](automatizaciones/n8n/alegra-receivables-aging-to-notion/) | [Calendario de pagos](automatizaciones/n8n/alegra-payables-calendar/) |
+| [Recordatorios de cobro](automatizaciones/n8n/alegra-overdue-invoice-reminders/) | [Guardián de facturas duplicadas](automatizaciones/n8n/alegra-duplicate-bill-guard/) |
+| [Alerta de reposición](automatizaciones/n8n/alegra-low-stock-reorder-alert/) | [Guardián de anomalías](automatizaciones/n8n/alegra-invoice-anomaly-guard/) |
+| [Facturación recurrente del mes](automatizaciones/n8n/alegra-monthly-recurring-billing-run/) | [Checklist de cierre de mes](automatizaciones/n8n/alegra-month-close-checklist/) |
+| [Seguimiento a cotizaciones frías](automatizaciones/n8n/alegra-stale-estimate-followup/) | |
+| [Bienvenida a un cliente nuevo](automatizaciones/n8n/alegra-new-client-onboarding/) | |
+
+No necesitas saber programar. Arranca por **[Empezar aquí](automatizaciones/EMPEZAR-AQUI.md)**: en 15 minutos tienes la primera corriendo.
 
 ---
 
